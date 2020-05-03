@@ -1,0 +1,17 @@
+#The corresponding posterior predictive probability
+length(da)/length(pred_samples)
+
+theta=c(0,.125,.250 ,.375,.500,.625,.750,.875 , 1) p_theta=c( .001, .001 , .950 , .008 , .008 , .008 , .008 , .008 ,.008) like=dbinom(x=7, size=10, theta)
+p_y=p_theta %*% like
+
+theta=c(0,.125,.250 ,.375,.500,.625,.750,.875 , 1) p_theta=c( .001, .001 , .950 , .008 , .008 , .008 , .008 , .008 ,.008) like=dbinom(x=6, size=10, theta)
+p_y=p_theta %*% like
+post_theta=(dbinom(x=6, size=10, theta) * p_theta)/p_y
+
+## Obtain 10000 samples from the posterior (Beta(Y+a,n-Y+b)) a=1; b=5; # previous prior
+Y=14; n=30 # results from previous experiments
+m=20 ## twenty new students
+post_samples = rbeta(10000,Y+a,n-Y+b) ## generate 10,000 values from a Beta posterior
+## Generate one predictive value from the Binomial from each theta from the posterior pred_samples=sapply(post_samples, rbinom, size=20, n=1) ## size=n. trials
+hist(pred_samples, col="blue", probability=TRUE, main="predictive distribution", xlab="predicti
+ 
