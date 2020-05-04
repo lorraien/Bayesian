@@ -1,0 +1,248 @@
+This discussion is meant to provide some more context to the discussion of Hierarchical models we have seen in class.
+Before starting, I would like to point out that \color{red} the most important point in a Bayesian analysis is thinking about your model. 
+You should always justify your model decisions\color{black}. Please, do not hesitate to contact me if you need to discuss anything.
+
+We start by considering a Meta-Analysis study for investigating Beta-Blockers and mortality after myocardial infarction.
+
+Yusuf et al. (1985) in ``Beta Blockade During and After Myocardial Infarction: An Overview of Randomized Trials" summarize mortality after myocardial infarction from 22 studies.
+For each study, the data are in the form of  tables that consist of patients who are randomly assigned to receive beta-blockers or placebo. 
+
+```{r}
+library(mlmRev)
+data("Hsb82")
+
+multistudies = read.csv("./multistudies.csv")
+head(multistudies)
+library(R2jags)
+
+
+## total number of patients 
+## in the two arms of the study
+## or the exposed/unexposed populations
+
+nA=multistudies$ctrlN
+nB=multistudies$trtN
+
+## number of events in the two arms
+
+rA=multistudies$ctrl
+rB=multistudies$trt
+
+Nstud=length(nA)
+```
+
+**Model 1** We need to identify an appropriate  model. First, let us consider the following model, with a likelihood
+$$
+y^c_i \stackrel{ind}\sim Bin(n^c_i, \theta^c_i), \qquad \qquad y^T_i \stackrel{ind}\sim Bin(n^T_i, \theta^T_i)
+$$
+where $y^j_i$ denotes the deaths out of $n^j_i$ patients in study $i$ for the $j=c$ control group, or $j=T$ the treatment group. We can consider priors to tie together the $i$ within each treatment arm:
+
+$$
+\theta^c_i \sim Beta(\alpha^c, \beta^c) \qquad \theta^T_i \sim Beta(\alpha^T, \beta^T)
+$$
+Notice that the priors for $\theta^c_i$ and $\theta^T_i$ are from a common distribution \color{blue} within each arm \color{black}. However, the two arms are still separated. Therefore, so far the model assumes
+
+- that there is variability among the studies, maybe due to protocol or other unknown characteristics. That is why we assume $\theta_i^c$ instead of a simple $\theta^c$. 
+
+- that there is essentially no common underlying factor that may explaining the deaths for the control and treatment group. According to the cases, this might not be a reasonable assumption. Hence, we assume a further layer in the hierarchy, that connects the two models through the priors on $\alpha^c, \beta^c$ and $\alpha^T, \beta^T$. We first define 
+$$
+\mu^c=\frac{\alpha^c}{\alpha^c+\beta^c} \qquad \mu^T= \frac{\alpha^T}{\alpha^T+\beta^T}
+$$
+and 
+$$
+\eta^c =\alpha^c+\beta^c \qquad \eta^T=\alpha^T+\beta^T
+$$
+and the following priors
+$$
+\mu^c, \mu^T \sim Beta(a,b) \qquad \eta^c, \eta^T \sim \log\text{Normal}(m,C)
+$$
+We implement the model in rjags for some values of the parameters $a,b,m,C$. Notice that we are interested in the fact that overall, despite the differences in the studies, the Beta-Blockers may not induce more deaths than standard of care. In other words, we are interested in:
+$$
+P(\mu^T - \mu^C>0|y)
+$$
+to test  $H_0: \mu^T>\mu^C$, and we are looking at small values of the above probability to reject the null hypothesis. 
+
+```{r}
+set.seed(12345)
+jags.data=list(rA=rA, rB=rB, nA=nA, nB=nB, Nstud=Nstud, m=0, C=3, a=1,b=1)
+
+
+model_string <- "model
+{
+  for( i in 1 : Nstud ) {
+    rA[i] ~ dbin(pA[i], nA[i])
+    rB[i] ~ dbin(pB[i], nB[i])
+    pA[i] ~ dbeta(alpha[1], beta[1])
+    pB[i] ~ dbeta(alpha[2], beta[2])
+  }
+  for(j in 1:2)
+  {
+    alpha[j] =eta[j]*mu[j]
+    beta[j] = eta[j]*(1-mu[j])
+    eta[j] ~ dlnorm(m, 1/C); 
+    mu[j] ~ dbeta(a, b);  
+  }
+  prob_overall=step(mu[2]-mu[1])  ## more mortality in treat vs control?
+  prob_each_study=step(pB-pA) ## in each study
+}"
+  
+# parameters to be monitored:	
+jags.param <- c("mu", "prob_overall", "prob_each_study")
+
+
+jags.fit <- jags(data=jags.data, 
+                 parameters.to.save = jags.param,
+                 model.file=textConnection(model_string),  
+                 n.iter=20000, n.chains=3,
+                 n.burnin=10000, 
+                 n.thin=1, DIC=T)
+
+jags.fit
+  
+```
+Notice that the probability is indeed small ($\approx$ `r jags.fit$BUGSoutput$summary["prob_overall", "mean"]`). Notice also that this model allows us to assess the variability of each study, by monitoring the $P(\theta_i^T-\theta_i^C>0|y)$ for each study $i$. We can effectively see the variability for each study: a clear picture is not immediately evident by looking at the single studies (e.g. see the values of such probability for study 14 and for study 10), and this ultimately led to the necessity to conduct a meta-analysis.
+
+We could have thought of a second model:
+
+**Model 2** This model assumes:
+
+$$
+y^c_i \stackrel{ind}\sim Bin(n^c_i, \theta^c), \qquad \qquad y^T_i \stackrel{ind}\sim Bin(n^T_i, \theta^T)
+$$
+In this case, notice that $\theta^c$ is common to all the studies. The variability across studies is not explicitly acknowledged (more on this below)
+
+$$
+\theta^c \sim Beta(\alpha^c, \beta^c) \qquad \theta^T \sim Beta(\alpha^T, \beta^T)
+$$
+Here, you can choose to either fix $\alpha^c$ and $\beta^c$ according to some available information (like we did in the first few weeks). Alternatively, you could also assign priors to  $\alpha^j$ and $\beta^j$ as discussed above. In this second case, the interpretation of the parameters of this third-level priors may be a bit difficult.
+
+However, there are a few important differences between model 1 and model 2:
+
+- the variability across studies is not explicitly acknowledged. The data in each study are assumed to reflect a common underlying ``mortality rate" in each group. This may be sometimes a reasonable assumption. However, we should be aware that such assumption may be OK for describing relatively \color{red} homogeneous populations\color{black}. It \color{red} may not be OK \color{black} and produce unsatisfactory inferences \color{red} if the population is very diverse \color{black} (e.g. there are many studies that provide markedly different results). 
+
+Once again, always justify your model decisions!
+
+In any event, let us consider the model for this case, and run it into rjags:
+
+We assume $\alpha^c=1, \beta^c=1$ and $\alpha^T, \beta^T=1$ (uniform priors)
+
+```{r}
+jags.data=list(rA=rA, rB=rB, nA=nA, nB=nB, Nstud=Nstud, m=0, C=3, a=1,b=1, alpha=c(1,1), beta=c(1,1))
+
+
+model_string <- "model
+{
+  for( i in 1 : Nstud ) {
+    rA[i] ~ dbin(muA, nA[i])  ## notice the difference here!
+    rB[i] ~ dbin(muB, nB[i])
+  }
+   muA ~ dbeta(alpha[1], beta[1])
+   muB ~ dbeta(alpha[2], beta[2])
+  prob_overall=step(muB-muA)  ## more mortality in treat vs control?
+}"
+  
+# parameters to be monitored:	
+jags.param <- c("muA", "muB", "prob_overall")
+
+
+jags.fit <- jags(data=jags.data, 
+                 parameters.to.save = jags.param,
+                 model.file=textConnection(model_string),  
+                 n.iter=20000, n.chains=3,
+                 n.burnin=10000, 
+                 n.thin=1, DIC=T)
+
+jags.fit
+
+library(bayesplot)
+jags.mcmc=as.mcmc(jags.fit)
+
+
+mcmc_intervals(jags.mcmc, pars=c("muA", "muB"), prob = 0.8, # 80% intervals - inner
+    prob_outer = 0.95, # 95% - outer
+    point_est = "mean")
+
+```
+
+  While the model appears to provide a more definitive answer when one considers the probability $P(\theta^T-\theta^c>0)$, the solution may not be satisfactory under multiple regards. First, the constraint $\theta_i^j=\theta^j, j=c,T$ leads to a posterior inference which does not appropriately reflect the variability in the studies. The inference on $\theta^j, j=c,T$ is more the result of the mere numbers of studies where the treatment arm has less deaths than standard of care, then the result of the variability of the differences. 
+  
+Overall Model 1 is preferable, as it better takes into account the heterogenity of the studies.
+
+**Model 3** We could have also considered the {\blue completely independent model}:
+
+
+$$
+y^c_i \stackrel{ind}\sim Bin(n^c_i, \theta^c_i), \qquad \qquad y^T_i \stackrel{ind}\sim Bin(n^T_i, \theta^T_i)
+$$
+
+$$
+\theta^c_i \sim Beta(\alpha_i^c, \beta_i^c) \qquad \theta^T_i \sim Beta(\alpha_i^T, \beta_i^T)
+$$
+Notice the difference with the specification above. I am not going to work more on this model, because I don't like it. Why? What is the main issue with this model? Would I be able to obtain inference on a common treatment effect underlying all studies?
+
+
+## Another dataset: Health centers in the UK
+
+We now consider data from the  Bristol Pediatric Cardiac Mortality Study.  The data were collected on 30-day mortality following pediatric surgery at Bristol Hospital and 11 other UK centers. So, we have a total of 12 hospitals. 
+
+```{r}
+bristolDat<-list(N=12,r=c(25, 24, 23, 25, 42,24,53,26,25,58,31,41),
+                 n=c(187,323,122,164,405,239,482,195,177,581,301,143))
+
+jags.data <- list(N=12,deaths=c(25, 24, 23, 25, 42,24,53,26,25,58,31,41),
+                  n=c(187,323,122,164,405,239,482,195,177,581,301,143), m=0, C=3, a=1,b=1)
+
+## n: number of surgeries
+## r: number of deaths
+## N= hospitals
+
+```
+
+
+We consider the following model, where once again the interest may be to describe \color{red} the heterogeneity of outcomes \color{black} across hospitals:
+$$
+y_i \sim Bin(\theta_i, n_i)
+$$
+$$
+p_i\sim Beta(\alpha, \beta)
+$$
+$$
+\mu=\frac{\alpha}{\alpha+\beta}\qquad \eta=\alpha+\beta
+$$
+In these types of problems, the interest may often be in comparing the mortality rates in 2 different hospital, as a quality control and to develop preventative measures. We can compare for example the mortality rates by computing $P(|\theta_i - \theta_j|>0|y)$ for two hospitals $i,j$. The following code considers two cases: $(i=3, j=12)$ and $(i=8, j=9)$. 
+
+```{r}
+model_string <- "model
+{
+  for( i in 1 : N ) {
+    deaths[i] ~ dbin(p[i], n[i])
+    p[i] ~ dbeta(alpha, beta)
+  }
+  alpha =eta*mu
+  beta = eta*(1-mu)
+  eta ~ dlnorm(m, 1/C); 
+  mu ~ dbeta(a, b);  
+  prob3_12=step(p[3]-p[12])
+  prob7_5=step(p[7]-p[5])
+}"
+  
+jags.param <- c("p", "mu", "prob3_12", "prob7_5")
+
+jags.fit <- jags(data=jags.data, 
+                   parameters.to.save = jags.param,
+                   model.file=textConnection(model_string),  
+                   n.iter=20000, n.chains=3,
+                   n.burnin=10000, 
+                   n.thin=10, DIC=T)
+  
+jags.fit
+```
+The results suggest that two of the hospitals may be indeed characterized by different mortality rates,
+whereas two other hospitals have more similar rates. Run the model and see if that is the case for any of the comparisons we considered. 
+
+For a different (more complete) analysis of these data, see:
+Spiegelhalter (2002) Mortality and volume of cases in paediatric cardiac surgery: retrospective study based on routinely collected data, BMJ.
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC65055/
+
+
+  
