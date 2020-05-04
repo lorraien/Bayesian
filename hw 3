@@ -1,0 +1,236 @@
+## Problem 1
+
+1.Use BetaBuster to find the Beta(a,b) priors for mode 0.75 and 5th percentile 0.60, and for mode 0.01 and 99th percentile 0.02. What is the Beta prior when the mode is 1 and the first percentile is 0.80?
+```{r cars}
+library(survival)
+library("epiR")
+prior.1 <- epi.betabuster(mode=0.75, greaterthan=F, x=0.6, conf=0.05) 
+prior.1$shape1; prior.1$shape2
+prior.2 <- epi.betabuster(mode=0.01, greaterthan=F, x=0.02, conf=0.99) 
+prior.2$shape1; prior.2$shape2
+prior.3 <- epi.betabuster(mode=1, greaterthan=F, x=0.8, conf=0.25) 
+prior.3$shape1; prior.3$shape2
+```
+## Problem 2
+### (1)
+ $n_1$ and $n_2$ represents the number of people assigned to G+D arm and G arm, $n_1=49$ and $n_2=73$, and $y_1$ and $y_2$ represents the number of people who reached the end point,  $y_1=13$ and $y_2=23$. So the parameter we interested in is $\theta^G$ for G and $\theta^{G+D}$ for G+D.
+
+In this case, we can assume that:
+$$y_1 \sim Bin(n_1,\theta^G),y_2 \sim Bin(n_2,\theta^{G+D}) $$
+and two tratments share may be sharing some information due to the presence of G in both arms.
+$$\theta^G|\alpha,\beta,\theta^{G+D}|\alpha,\beta \sim Beta(\alpha,\beta)$$
+To determine $\alpha$ and $\beta$, we do the following transformation:$\mu=\frac{\alpha}{\alpha+\beta}$. $\eta=\alpha+\beta$. we further assume:
+$$\mu \sim Beta(a,b), \eta\sim Lognoraml(c,d)$$
+
+### (2)
+"the mode response rate should be around around 25%, and less than 0.7 with high probability" and "prior sample size could be considered as a positive random variable roughly centered around 1 and large variance 3". That is we should choose a, b, c and d such that $Beta(a,b)$ have mode 0.25 and 95th percentile 0.7 and $Lognoraml(c,d)$ with median 1 and variance 3. So we have:
+```{r}
+# total number of patients 
+## in the two arms of the study
+#there may be some sharing due to the presence of G in both arms.
+library('rjags')
+library(R2jags)
+set.seed(12345)
+Y=c(13,23);
+n=c(49,73);
+prior <- epi.betabuster(mode=0.25, greaterthan=F, x=0.7, conf=0.95) 
+a=prior$shape1; b=prior$shape2
+jags.data=list(Y=Y, n=n, N=2, a=a,b=b,c=0,d=3)
+model_string <-"model{
+for (i in 1:N) {
+Y[i] ~ dbin(theta[i], n[i])
+theta[i] ~ dbeta(alpha, beta)
+}
+alpha =eta*mu;
+beta = eta*(1-mu);
+eta ~ dlnorm(c, 1/d);
+mu ~ dbeta(a, b);
+RD=step(theta[2]-theta[1])
+RR=step(theta[2]/theta[1]-1)
+ypred_1 ~ dbin(theta[1], 250)     ## adding the pred distributions in rjags
+ypred_2 ~ dbin(theta[2], 250)
+}"
+
+jags.param <- c("theta", "mu","RD","RR")
+jags.fit <- jags(data=jags.data, 
+                   parameters.to.save = jags.param,
+                   model.file=textConnection(model_string),  
+                   n.iter=20000, n.chains=3,
+                   n.burnin=10000, 
+                   n.thin=10, DIC=T)
+jags.fit
+```
+###(3)
+from(2),the posterior means $E(\theta^{G}|y)$ is 0.274 and $E(\theta^{G+D}|y)$is 0.315.
+```{r}
+##90% credible interval 
+print(jags.fit,intervals=c(0.05, 0.5, 0.95)) 
+```
+ 90% credible interval for $\theta^{G}|y$ is (0.178,0.375),
+ 90% credible interval for $\theta^{G+D}|y$ is (0.232,0.404).
+###(4)
+
+I would recommend the trial for a large Phases III study.Because Phase III trials look for efficacy and safety, in previous posterior distribtuion we could find that the probability that $P(\theta^{G+D}-\theta^{G}>0|y)$ is 0.695 and expectation of $\theta^{G+D}|y$ is slightly higher than the expectation of $\theta^{G}|y$ . We could conclude that treatment G+D is more effective. To Valid this conclusion,as a new treatment progresses through the clinical trial process, more and more information that needed to accumulated.We want to base our judgement on the trial data, so more data samples could provide us more information of our interest.
+###(5)
+```{r}
+jags.param <- c("ypred_1","ypred_2")
+jags.fit <- jags(data=jags.data, 
+                   parameters.to.save = jags.param,
+                   model.file=textConnection(model_string),  
+                   n.iter=20000, n.chains=3,
+                   n.burnin=10000, 
+                   n.thin=10, DIC=T)
+jags.fit
+```
+Based on the previous posterior distribution,we could get the prediction:
+For treatment G: 
+$E(y_{pred}|\theta^G)=68.45$ and its 95% credible credible is(38,103)
+For treatment G+D:
+$E(y_{pred}|\theta^{G+D})=78.77$ and its 95% credible credible is(51,109)
+
+### multi-arm 
+###(1)
+ $n_i^t, {i=1,2,3,4}$represents the number of people assigned with one specific treatment in specific group, and $y_i^t$  represents the number of people who reached the end point with specific treatment in specific group,   $n_i^c$represents the number of people from different group i assigned to control group, and $y_i^c$  represents the number of people from different groups reached the end point in control group  ,  So we are interested in the comparision of $\theta_i^t$ and  $\theta_i^c$.
+  let us consider the following model, with a likelihood
+  $$y_i^t \sim Bin(n_i^t,\theta_i^t), y^c \sim Bin(n^c,\theta^c), i={1,2,3,4}$$
+Because four different groups receive different treatments, while the control group receive standard care.
+ The priors will probably be different in the control and treatment groups.We could first define:
+$$logit(\theta^c)=log(\frac{\theta^c}{1-\theta^c})=\mu^c, logit(\theta_i^t)=log(\frac{\theta_i^t}{1-\theta_i^t})=\mu_i^t=\mu^c+\delta_i^t, i={1,2,3,4}$$
+$$\mu_c\sim normal(0,1000), \delta_i^t\sim normal(d_i,\sigma_i^2)$$ 
+and the $d_i\sim normal(0,10000)$,$\sigma_i^t \sim Uniform(0,1000)$
+###(2)
+ $n_i^j, {i=1,2,3,4,5}$represents the number of people assigned to group i with treatment j, and $y_i^j$  represents the number of people who reached the end point in group i with treatment j,  $n_i^c, {i=1,2,3,4,5}$represents the number of people from group i assigned to control group, and $y_i^j$  represents the number of people from group i reached the end point in  control group, So the parameter we interested in is the comparison of  $\theta_i^j$ and $\theta_i^c$.
+  let us consider the following model, with a likelihood
+  $$y_i^j \sim Bin(n_i^j,\theta_i^j),y^c \sim Bin(n^c,\theta^c),{i=1,2,3,4},j={1,2} $$
+Because four different groups receive two different treatments,the control group receive standard care,we have totally nine arms.We could first define:
+$$ logit(\theta^c)=log(\frac{\theta^c}{1-\theta^c})=\mu^c, logit(\theta_i^j)=log(\frac{\theta_i^j}{1-\theta_i^j})=\mu_i^j=\mu^c+\delta_i^j, i={1,2,3,4}, j={1,2}$$
+$$\mu_c\sim normal(0,1000), \delta_i^j\sim normal(d_{ij},\sigma_{ij}^2)$$ 
+and because same group could share same some information
+we have 
+$d_{ij}|\eta i \sim p(d_{ij}|\eta_i)$ and $\sigma_{ij}^2 \sim uniform (0,1000)$
+###(3)
+ we are interested in the difference between treatment and the standard care despite the group effect. The treatment j (j=A,B,D,E) in group i may  more people reach the end point than standard care. In other words, we are interested in:
+$$P(\frac{\theta_i^t}{\theta^c}>1|y_i^t,y^c),i=1,2,3,4$$
+to make a decision,  we are looking at probability that treatment effect greater than standard care
+from hierarchical model .I would set the threshold at 0.3 to stopping tratment , which means if there are more than or equal than 70% probability that the average people in treatment readch the end points less than the average people who reach the end points,our treatment may be not effective enough.In this case ,I would take action a.
+I would set the threshold at 0.6 to take the action c,which means if there are 30% ~70% probability that the average people in treatment who readch the end points less than the average people who reach the end points,our treatment  needed to be ovserved more.In this case ,i would take action b.
+If there are less than or equal than $30%$ probability that the average people in treatment  who readch the end points less than the average people who reach the end points,our treatment may be  effective.In this case ,i would take action c.
+
+
+###(4)
+I suggest that the standard of care arm should have always remained in the set of available treatments.Because the population of standard care group is coming from the population of treatment when we compare the different treatment in different group.Keeping standard of care arm could share some information with the different treatment group, which could help us easily compare the effect of treatment.
+
+
+## Problem 3
+###(1)
+$n_s^c, {s=1,..,948},{c=1,..,9}$represents the number of opportunities of player s in position c, and $z_s^c$  represents the number of hits of player s in position c,   So the parameter we interested in is batting average of each player,denoted by $\theta_s^c$.
+  let us consider the following model, with a likelihood
+  $$z_s^c \sim Bin(n_s^c,\theta_s^c),{s=1,..,948},{c=1,..,9} $$
+Then we assume 
+$$\theta_s^c \sim beta(a^c,b^c) $$ 
+
+we first define
+$$\mu^c=\frac{a^c}{a^c+b^c}, \eta^c=a^c+b^c$$
+and the following prior: $\mu^c$ follows a $Beta(a,b)$ distribution and $\eta^c$ follows a $Lognormal(m,c)$ distribution.
+###(2)
+batters typically hit the ball on 23$%$,we have$$ E(\mu^c)=\frac{a}{a+b}=0.23$$, we could assume a=23,b=77.
+```{r}
+data=read.csv("/Users/jing/Desktop/205/Batting Average.csv")
+library('rjags')
+library(R2jags)
+hit=data$Hits
+atbats=data$AtBats
+p=data$PriPosNumber
+N=length(hit)
+set.seed(12345)
+jags.data=list(z=hit, n=atbats, N=N, p=p,m=0, C=3, a=23,b=77)
+model_string <- "model
+{
+  for( i in 1 : N ) {
+  z[i] ~ dbin(theta[i], n[i])
+  theta[i] ~ dbeta(alpha[p[i]], beta[p[i]])
+
+  }
+  for(j in 1:9)
+  {
+  alpha[j] =eta[j]*mu[j]
+  beta[j] = eta[j]*(1-mu[j])
+  eta[j] ~ dlnorm(m, 1/C); 
+  mu[j] ~ dbeta(a, b);  
+  }
+RD1=step(mu[1]-mu[2])
+RD2=step(mu[1]-mu[3])
+RR1=step(mu[1]/mu[2]-1)
+RR2=step(mu[1]/mu[3]-1)
+RR11=step(theta[142]/theta[921]-1)
+RR22=step(theta[573]/theta[143]-1)
+}"
+  
+  # parameters to be monitored:   
+  jags.param <- c("mu","RR1","RR2")
+  jags.fit<- jags(data=jags.data, 
+                    parameters.to.save = jags.param,
+                    model.file=textConnection(model_string),  
+                    n.iter=2000, n.chains=5,
+                    n.burnin=1000, 
+                    n.thin=1, DIC=T)
+  jags.fit
+``` 
+###(3)
+From the previous posterior distribution,we could know the expectation of batting abilities of pichers is 0.131,95 % credible interval of pichers' batting abilities is (0.121,0.141).
+the expectation of batting abilities of catcher is 0.24,95 % credible interval of catchers' batting abilities is(0.231,0.25).
+we also have $p(\frac{\mu_1}{\mu_2}>1|y)=0$, which means the batting abilities of pichers are much less than catchers.
+
+
+###(4)
+From the previous posterior distribution,we could know the expectation of batting abilities of pichers is 0.131,95 % credible interval of pichers' batting abilities is (0.121,0.141).
+the expectation of batting abilities of irst base players is 0.254,95 % credible interval of irst base players' batting abilities is(0.245,0.263).
+we also have $p(\frac{\mu_1}{\mu_3}>0|y)=0$, which means the batting abilities of pichers are much less than first base players.
+
+
+###(5)
+to compare the batting abilities between Wellington castillo and Matt wieter:
+```{r}  
+  # parameters to be monitored:   
+  jags.param <- c("theta[142]","theta[921]","theta[573]","theta[143]","RR11","RR22")
+  jags.fit<- jags(data=jags.data, 
+                    parameters.to.save = jags.param,
+                    model.file=textConnection(model_string),  
+                    n.iter=2000, n.chains=5,
+                    n.burnin=1000, 
+                    n.thin=1, DIC=T)
+  jags.fit
+  
+#individuals 
+ set.seed(12345)
+  x=c(142,143,573,921)
+  jags.data=list(z=hit[x], n=atbats[x], N=4, m=0, C=3, a=23,b=77)
+  model_string <- "model
+  {
+  for( i in 1 : N ) {
+  mu[i] ~ dbeta(a, b);
+  alpha[i] =eta[i]*mu[i]
+  beta[i] = eta[i]*(1-mu[i])
+  eta[i] ~ dlnorm(m, 1/C); 
+  z[i] ~ dbin(theta[i], n[i])
+  theta[i] ~ dbeta(alpha[i], beta[i])
+ }
+  
+  }"
+  # parameters to be monitored:   
+  jags.param <- c("theta")
+  jags.fit<- jags(data=jags.data, 
+                    parameters.to.save = jags.param,
+                    model.file=textConnection(model_string),  
+                    n.iter=2000, n.chains=5,
+                    n.burnin=1000, 
+                    n.thin=1, DIC=T)
+  jags.fit
+  
+``` 
+From the posterior distribution,we could know that the $p(\frac{\theta_{142}}{\theta_{921}}>1|y)=0.576$, which means the average probability of Wellington Castillo 's batting ability bigger than Matt Wieters 's batting ability is 0.576 ,the standard error is 0.494. When we look at the expecation of batting abilities of this two players,we could find the values are 0.252 and 0.247,which are quite similar.In this case,we could say the batting abilitiy between Wellington Castillo and Matt Wieters is similar.The 95% credible interval of the batting abilities in catcher's position is (0.23,0.25).The 95% credible interval of batting abilities for Wellington Castillo and Matt Wieters is (0.205,0.299) and (0.214,0.28).In the individaul model, 95% credible interval of batting abilities for Wellington Castillo and Matt Wieters is (0.199,0.33) and (0.213,0.288).We could find that the credible intervals of individuals are longer than hierarical models,that is the evidence of shrinkage in the estimates.
+
+###(6)
+From the posterior distribution,we could know that the expectation of 
+$p(\frac{\theta_{573}}{\theta_{143}}>1|y)=0.983$, 
+which means the batting probability of Andrew McCutchen highert than Jason Castro 's batting ability is 0.983 ,the standard error is 0.129. When we look at the expecation of batting abilities of this two players,we could find the values are 0.307 and 0.25,respectively.In this case, we could indicate that the batting abilities between Andrew McCutchen is higher than Jason Castro.The 95% credible interval of batting abilities for Andrew McCutchen and  Jason Castro is (0.277,0.34) and (0.209,0.293).In the individaul model, 95% credible interval of batting abilities for Andrew McCutchen and Jason Castro is (0.289,0.364) and (0.206,0.309).We could find that the credible intervals of individuals are longer than hierarical models,that is the evidence of shrinkage in the estimates.
