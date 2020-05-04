@@ -1,0 +1,172 @@
+---
+title: "Posterior Credible Intervals"
+
+
+
+ 
+### Beta-Binomial model: An Example on insurance claims. 
+
+We want to derive some  interval for the probability to claim a loss.
+
+Our data: out of n = 1047 policies there are y=159 claims.
+
+For this type of data, we assume a Binomial likelihood. 
+
+In the lack of information, we assume a Uniform prior on the proportion of claims (a priori), that is we assume
+
+$$
+L(y|\theta) \propto p^y (1-p)^{n-y}
+$$
+and then we assume
+$$
+p \sim Beta(1,1)\equiv Unif(0,1)
+$$
+```{r}
+n=1047
+y=159
+```
+
+The posterior distribution
+
+$$
+p(\theta|y) \sim Beta(1+y, 1+n-y)
+$$
+
+Hence
+$$
+E(\theta|y)=\frac{1+y}{n+2}
+$$
+```{r}
+post_mean <- (1+y)/(2+n); post_mean
+```
+
+We can compute the 95\% credible interval by computing the values (c,d) such that the posterior probability
+
+$$
+P(\theta \in (c,d)|y)=0.95
+$$
+or, alternatively,
+
+$$
+P(\theta \leq c | y)=0.025 \qquad \& \qquad P(\theta \geq d | y )=0.025
+$$
+
+```{r}
+post_95CI <- qbeta(c(0.025, 0.975),1+y,1+n-y); post_95CI
+```
+
+We can plot this in the following way:
+
+```{r}
+u=seq(.1,.2,length=501)
+v=dbeta(u,1+y,1+n-y)
+plot(u,v,axes=FALSE,type="l")
+I=u<qbeta(.025,1+y,1+n-y)
+polygon(c(u[I],rev(u[I])),c(v[I],
+                            + rep(0,sum(I))),col="red",density=30,border=NA)
+I=u>qbeta(.975,1+y,1+n-y)
+polygon(c(u[I],rev(u[I])),c(v[I],
+                            + rep(0,sum(I))),col="red",density=30,border=NA)
+axis(1)
+```
+
+For the sake of the argument and to introduce a framework that we will soon discuss more in detail, we can notice that could have also computed the posterior credible interval in *a different way*, that is through *Monte Carlo Approximation* by generating $m$ samples from the posterior and then computing the quantiles of the empirical distribution
+
+```{r}
+m_samples = 100000
+
+## generate n_samples from the posterior 
+post_samples <- rbeta(m_samples,1+y,2+n-y)
+
+approx_post_95CI <- quantile(post_samples, probs = c(0.025, 0.975)); approx_post_95CI
+```
+
+We can compare the theoretical and approximate quantiles.
+
+```{r}
+hist(post_samples,prob=TRUE,col="light green",
+     border="white",axes=FALSE, breaks=100,
+     main="",xlab="",ylab="",lwd=3,xlim=c(.12,.18))
+u=seq(.1,.2,length=501)
+I=u<as.numeric(approx_post_95CI[1])
+lines(polygon(c(u[I],rev(u[I])),c(v[I],
+                                  + rep(0,sum(I))),col="red",density=30,border=NA))
+I=u>as.numeric(approx_post_95CI[2])
+lines(polygon(c(u[I],rev(u[I])),c(v[I],
+                                  + rep(0,sum(I))),col="red",density=30,border=NA))
+axis(1)
+```
+
+
+
+### Comparison with the Frequentist 95% Confidence Interval
+
+Let's consider again our data
+
+```{r}
+y <- 159
+n <- 1047
+```
+
+The definition of the frequentist condidence interval is as follows:
+
+**Definition [Frequentist Confidence Interval]** : an interval estimate for a real-valued parameter $\theta$
+based on a sample $\underline { X } \equiv \left( X _ { 1 } , \ldots , X _ { n } \right)$ is a *pair of functions* $L(\underline(X))$ and $U(\underline(X))$ such that $L ( \underline { X } ) \leq U ( \underline { X } )$, i.e. $[ L ( \underline { X } ) , U ( \underline { X } ) ]$
+
+
+The coverage probability of an interval estimator is
+
+$P _ { \theta } ( \theta \in [ L ( \underline { X } ) , U ( \underline { X } ) ] ) = P _ { \theta } ( L ( \underline { X } ) \leq \theta , U ( \underline { X } ) \geq \theta )$
+
+This is the probability that the random interval  $[ L ( \underline { X } ) , U ( \underline { X } ) ]$ cover the true $\theta$.
+
+The definition of Confidence Interval makes it clear that it is based on the distribution of the data. This point is also clear if you look at the derivation of the confidence interval by using the pivotal quantity method. The pivotal quantity is a function of the data and $\theta$, but the distribution of such pivotal quantity does not depend on the unknown parameters. 
+
+Therefore, in frequentist statistics, the confidence interval **does not capture the probability** that $\theta$ is in the stated interval, which is what one is actually interested in. The coverage of the confidence interval actually changes if the true value of $\theta$ changes. 
+
+Let's consider the distribution of the data and the relationship with a given unknown value of $\theta$
+
+We start by generating 100 *virtual* datasets from a binomial experiment with $\theta$ equal to a given value $p$. Here, for simplicity or better for lack of originality, we assume $\theta=\hat{p}=y/n$ the proportion observed in our insurance claim above, but it could be really any value in $(0,1)$. Every dataset we generate will be characterized by a sample proportion $\hat{p}^j_n$, $j=1, \ldots, 100$. We build our confidence interval based on that sample proportion; typically, under normality asymptotic assumptions,
+
+$$
+\hat { p }_n \pm z \cdot \sqrt { \frac { \hat { p }_n ( 1 - \hat { p }_n ) } { n } }
+$$
+
+where $z$ depends on the confidence level. If we assume  $\alpha=0.05$, we get the usual $z=1.96$. These confidence intervals are reported in blue in the plot below, for each dataset $j$.
+
+```{r}
+ns <- 100
+M=matrix(rbinom(n*ns,size=1,prob=y/n),nrow=n)
+
+fIC=function(x) mean(x)+c(-1,1)*1.96*sqrt(mean(x)*(1-mean(x)))/sqrt(n)
+IC=t(apply(M,2,fIC))
+MN=apply(M,2,mean)
+
+k=(y/n<IC[,1])|(y/n>IC[,2])
+plot(MN,1:ns,xlim=range(IC),axes=FALSE,
+     xlab="",ylab="",pch=19,cex=.7,
+     col=c("blue","red")[1+k])
+axis(1)
+segments(IC[,1],1:ns,IC[,2],1:
+           + ns,col=c("blue","red")[1+k])
+abline(v=y/n)
+```
+
+##### hw
+#The corresponding posterior predictive probability
+length(da)/length(pred_samples)
+
+theta=c(0,.125,.250 ,.375,.500,.625,.750,.875 , 1) p_theta=c( .001, .001 , .950 , .008 , .008 , .008 , .008 , .008 ,.008) like=dbinom(x=7, size=10, theta)
+p_y=p_theta %*% like
+
+theta=c(0,.125,.250 ,.375,.500,.625,.750,.875 , 1) p_theta=c( .001, .001 , .950 , .008 , .008 , .008 , .008 , .008 ,.008) like=dbinom(x=6, size=10, theta)
+p_y=p_theta %*% like
+post_theta=(dbinom(x=6, size=10, theta) * p_theta)/p_y
+
+## Obtain 10000 samples from the posterior (Beta(Y+a,n-Y+b)) a=1; b=5; # previous prior
+Y=14; n=30 # results from previous experiments
+m=20 ## twenty new students
+post_samples = rbeta(10000,Y+a,n-Y+b) ## generate 10,000 values from a Beta posterior
+## Generate one predictive value from the Binomial from each theta from the posterior pred_samples=sapply(post_samples, rbinom, size=20, n=1) ## size=n. trials
+hist(pred_samples, col="blue", probability=TRUE, main="predictive distribution", xlab="predicti
+ 
