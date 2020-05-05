@@ -1,0 +1,293 @@
+
+##Problem 1
+The parameter sets for the first model first sample prior is $\mu_1\sim N(4.86,2.31)$,$\tau_1\sim Gamma(0.001,0.001)$ and sample data is $\mu_1=0$, $\sigma^2_1=1$ and $n_1=100$ and for the second sample  prior is $\mu_2\sim N(5.39,1.28)$,$\tau_2\sim Gamma(0.001,0.001)$sample data is $\mu_2=0$,$\sigma^2_2=1$ and $n_2=15$. 
+The parameter sets for the second model have the same data sample as the first model, we just change a little bit in prior for the two samples that $\mu_1\sim N(4.86,0.00288)$ and $\mu_2\sim N(5.39,0.0028)$ with anything else hold.
+The parameter sets for the third model have the same data sample as the first model, we just change a little bit in prior for the first two sample that $\tau_1\sim Gamma(1,1)$ with anything else hold.
+The model and the results are shown as follows:
+```{r}
+library('rjags')
+library(R2jags)
+n = c(100,15)
+mu = c(0,0)
+tau = c(1,1)
+set.seed(123456)
+
+jags_model<-"model{
+  for(i in 1:n[1]) { y[i] ~ dnorm(mu[1], tau[1]) }
+  for(j in 1:n[2]) { x[j] ~ dnorm(mu[2], tau[2]) }
+  for(r in 1:2){
+  mu[r] ~ dnorm(a[r], b[r])
+  tau[r] ~ dgamma(c[r], d[r]) 
+  sigma[r] <- sqrt(1/tau[r])
+  }
+  meandiff  <- mu[1] - mu[2]
+  sdratio <- sigma[1]/sigma[2]
+  prob[1] <- step(meandiff) # Gives Pr(meandiff >0|data) 
+  prob[2] <- step(sdratio -1) # Gives Pr(sdratio >1|data)
+}"
+jags.param <- c("mu","meandiff","  sdratio","prob") 
+jags.data=list( n = c(100,15),
+                a = c(4.86,5.39), 
+                b = c(2.31,1.28), 
+                c = c(0.001,0.001), 
+                d = c(0.001,0.001),
+                y=rnorm(n[1],mu[1],sqrt(1/tau[1])), 
+                x=rnorm(n[2],mu[2],sqrt(1/tau[2])))
+jags.fit <- jags(data=jags.data, 
+                 parameters.to.save = jags.param,
+                 model.file=textConnection(jags_model),
+                 n.chains=3, n.iter=10000, n.burnin=1000, n.thin=5, DIC=T)
+jags.fit
+
+
+jags.data1=list( n = c(100,15),
+                 a = c(4.86,5.39), 
+                 b = c(0.00288,0.0028), 
+                 c = c(0.001,0.001), 
+                 d = c(0.001,0.001),
+                 y=rnorm(n[1],mu[1],sqrt(1/tau[1])), 
+                 x=rnorm(n[2],mu[2],sqrt(1/tau[2])))
+jags.fit1 <- jags(data=jags.data1, 
+                  parameters.to.save = jags.param,
+                  model.file=textConnection(jags_model),
+                  n.chains=3, n.iter=10000, n.burnin=1000, n.thin=5, DIC=T)
+
+jags.fit1
+
+jags.data2=list( n = c(100,15),
+                 a = c(4.86,5.39), 
+                 b = c(2.31,1.28), 
+                 c = c(1,0.001), 
+                 d = c(1,0.001),
+                 y=rnorm(n[1],mu[1],sqrt(1/tau[1])), 
+                 x=rnorm(n[2],mu[2],sqrt(1/tau[2])))
+jags.fit2 <- jags(data=jags.data2, 
+                  parameters.to.save = jags.param,
+                  model.file=textConnection(jags_model),
+                  n.chains=3, n.iter=10000, n.burnin=1000, n.thin=5, DIC=T)
+
+jags.fit2
+
+
+```
+From the first model, we could find that the posterior mean for $\mu_1$ is 0.128 and posterior mean for $\mu_2$ is 0.49 and the probabily of $\mu_1-\mu_2>0$ is 0.185, that means the probability that $\mu_2$ bigger than $\mu_1$ is 81.5%,we could detect a difference in mean . However, the probabily of $\sigma_1/\sigma_2>1$ is 0.466,very close to 0.5,it is difficult to detect a difference in variance.We could know that if we increase the difference between prior mean, it is more easy to detect the mean difference.
+From the second model, we could find that the posterior mean for $\mu_1$ is 0.033 and posterior mean for $\mu_2$ is 0.031and the probabily of $\mu_1-\mu_2>0$ is 0.506, it is difficult to detect a difference in mean. The probabily of $\sigma_1/\sigma_2>1$ is 0.962,it is easy to detect a difference in variance.Hence, when we the b is very small that means the precision of prior is very small,in this case, it is difficult to detect a difference in mean cause the prior information is overwhelming by the sample data. 
+From the third model, we could find that the posterior mean for $\mu_1$ is 0.233 and posterior mean for $\mu_2$ is 0.617 and the probabily of $\mu_1-\mu_2>0$ is 0.213, it is easy to detect a difference in mean. The probabily of $\sigma_1/\sigma_2>1$ is 0.424,it is no easy to detect a difference in variance.Hence, when we change the percision of prior on the first sample with other thing held, it is more easy to find a mean difference cause we put more weight on the first sample prior.
+
+
+
+
+##Problem 2
+### (1)
+ 
+$$Y_i^j|\mu,\tau \sim N(\mu+\delta_i,\frac{1}{\tau})$$
+Our objective is to estimate the posterior distribution of$\mu$ and $\sigma^2$, and the PM 10 levels of date i with respect to the monthly average.The inference on$\mu$borrows information from all obs, that on$\delta_i$ only from current obs.We select independence priors:
+$$\mu \sim N(40,100) ,1/\tau\sim Gamma(1,1)$$
+$$\delta_i\sim N(0,\frac{1}{\tau_\delta}),1/\tau_{\delta}\sim Gamma(1,1)$$
+$\mu+\delta_i$represents the daily patterms in the PM10 levels across the stations in Milan.$\mu$ represents a monthly summary of PM10 for october in Milan.
+
+### (2)
+```{r}
+PM10=read.csv("/Users/jing/Desktop/205/italy.csv",sep = ",",as.is = T)
+library('rjags')
+library(R2jags)
+set.seed(12345)
+jags.data=list(Y1=PM10$Milan1,Y2=PM10$Milan2,tau_mu=1/100, mu0=40, mdelta0=0, n=29)
+model_string <- "model{ 
+for(i in 1:n){
+Y1[i] ~ dnorm(mu+delta[i], tau)
+Y2[i] ~ dnorm(mu+delta[i], tau)
+delta[i] ~ dnorm(mdelta0, tau_delta)
+#daily patterns
+x[i]=mu+delta[i]
+}
+# Prior for mu
+mu ~ dnorm(mu0, tau_mu)
+# Prior for the inverse variance 
+tau ~ dgamma(1, 1)
+tau_delta ~ dgamma(1, 1)
+sigma.sq <- 1/tau
+sigma_delta.sq=1/tau_delta
+}"
+jags.param=c("mu","sigma.sq","sigma_delta.sq","x")
+jags.fit <- jags(data=jags.data, parameters.to.save = jags.param, model.file=textConnection(model_string),
+                 n.iter=5000, n.chains=1, n.burnin=1000,
+                 n.thin=1, DIC=T)
+```
+
+### (3)
+Computs the posterior mean of PM10 concentration levels in Milan for the following days :
+```{r}
+summary(jags.fit$BUGSoutput$sims.matrix[,"x[20]"])
+summary(jags.fit$BUGSoutput$sims.matrix[,"x[21]"])
+summary(jags.fit$BUGSoutput$sims.matrix[,"x[22]"])
+summary(jags.fit$BUGSoutput$sims.matrix[,"x[23]"])
+```
+the posterior mean of PM10 in 10/22/2017 is 75.58.
+the posterior mean of PM10 in 10/23/2017 is 13.611.
+the posterior mean of PM10 in 10/24/2017 is 46.85.
+the posterior mean of PM10 in 10/25/2017 is 53.26.
+
+### (4)
+Polt the posterior densities for the PM10 concentration levels in Milan for 10/22/2017 and 10/24/2017:
+```{r}
+library(bayesplot)
+M20=as.numeric(unlist(as.mcmc(jags.fit )[,"x[20]"])); 
+M22=as.numeric(unlist(as.mcmc(jags.fit)[,"x[22]"]))
+plot(density(M20,n=1500), type='l', xlab="", main="", ylab="",col="blue",ylim=c(0,0.12),xlim=c(0,100)) 
+lines(density(M22,n=1500),col="red",lty=1,lwd=5)
+mtext("PM10",line=3,side=1,cex=1.5)
+mtext("Posterior Density",line=2.5,side=2,cex=1.5)
+text(90,0.045,"10/22/2017",lwd=2,cex=1.2,col="blue")
+text(20,0.045,"10/24/2017",lwd=2,cex=1.2,col="red")
+```
+we could find the posterior densities of PM10 concentration in 10/22/2017 centered around $75\mu g/m^3$ and exceeds the regulatory threshold ($50\mu g/m^3$),the condition is not good.The posterior densities of PM10 concentration in 10/24/2017 centered around $50\mu g/m^3$, we could find the air condition has been improved a lot,the block came into effect.
+
+### (5)
+Compute the posterior probability that the PM10 concentration levels are higher than the regulatory threshold for the following dates 10/22/2017 and 10/24/2017:
+```{r}
+p20 <- sum(jags.fit$BUGSoutput$sims.matrix[,"x[20]"]>50)/jags.fit$BUGSoutput$n.sims 
+p22 <- sum(jags.fit$BUGSoutput$sims.matrix[,"x[22]"]>50)/jags.fit$BUGSoutput$n.sims
+c(p20, p22)
+```
+the probability of PM10 concentration level in date 10/22/2017 exceed the regulatory threshold is 100% and the probability of PM10 concentration level in date 10/24/2017 exceed the regulatory threshold is 20.27%. Because the probability in 10/24 exceed the regulatory threshold is quite low, I recommend stopping the circulation of diesel cars.
+
+### (6)
+Compute the posterior mean of PM10 in Milan for the entire month of october and corresponding 95% credible interval
+
+```{r}
+set.seed(12345)
+jags.param_mu=c("mu")
+jags.fit_mu<- jags(data=jags.data, parameters.to.save = jags.param_mu, model.file=textConnection(model_string),
+                 n.iter=5000, n.chains=1, n.burnin=1000,
+                 n.thin=1, DIC=T)
+jags.fit_mu
+```
+The posterior mean of PM10 in Milan for the entire month is 60.019 and its 95% credible interval is(50.958,68.430). 
+there are at least 97.5% probability that the PM10 levels exceed the regulatory threshold $50\mu g/m^3$.
+
+### (7)
+Plot thr posterior density of PM10 levels in Milan for the entire month of October.
+```{r}
+library(bayesplot)
+jagsfit.mcmc <- as.mcmc(jags.fit)
+mcmc_dens(jagsfit.mcmc, pars =c("mu"))
+```
+The plots shows that the overall level of PM10 concentration levels centered around 60.019 ,the probability that exceeds the regulatory threshold is very high.
+
+### (8)
+Compute the posterior mean of the variance of the sampling distribution that characterizes the daily PM10 levels in Milan.
+```{r}
+set.seed(12345)
+jags.param_sigma=c("sigma.sq","sigma_delta.sq")
+jags.fit_sigma<- jags(data=jags.data, parameters.to.save = jags.param_sigma, model.file=textConnection(model_string),
+                 n.iter=5000, n.chains=1, n.burnin=1000,
+                 n.thin=1, DIC=T)
+jags.fit_sigma
+mean(apply(as.matrix(PM10)[,c("Milan1", "Milan2")], 1, var))
+```
+we could find that the posterior mean of the variance of the sampling distrubution is 30.82,which is very similar to the average of daily sample variances 30.31, indicating that model works well. And the posterior mean of the variance of sampling distribution is quite large cause the block intervention cause the dramaticaly change of PM10 levels.
+ 
+### (9)
+Write a Bayesian model that hierarchically combines the data from the two city.
+Let $Ri^j$ be the PM 10 levels observed from the monitoring station j in date i in Rome.$i=1,2...29$,$j=1,2,3$ 
+$$R_i^j|\mu^R,\tau^R \sim N(\mu^R+\delta_i^R,\frac{1}{\tau^R})$$
+Let $Mi^j$ be the PM 10 levels observed from the monitoring station j in date i in Milan.$i=1,2...29$,$j=1,2$ 
+$$R_i^j|\mu^M,\tau^M\sim N(\mu^M+\delta_i^M,\frac{1}{\tau^M})$$
+$$1/\tau^R\sim Gamma(1,1),1/\tau^M\sim Gamma(1,1)$$
+Our objective is to estimate the posterior distribution of$\mu^R,\mu^M$ and country level effect $\mu^I$.The inference on$\mu^I$borrows information from all obs from Rome and Milan,and the standard deviation of Rome and Milan are the same $10\mu/m^3$so we could consider $\mu^R,\mu^M$ share some charateristic in the country level.We select independence priors:
+$$\mu^R,\mu^M \sim N(\mu^I,100) $$
+We assume a further layer in the hierarchy, that could reflects the historically PM10 levels of country levels,the average PM 10 levels across all monitoring stations in the country level is  
+$$\mu^I \sim N(\mu_o^I,\tau^I_0) ,1/\tau^I_0\sim Gamma(1,1)$$ 
+the average PM 10 levels across all monitoring stations in the country level could be possible values that among$(30\mu g/m^3,40\mu g/m^3)$,so we have$\mu_o^I\sim U(30,40)$.
+
+The PM10 levels of date i with respect to the monthly average in Rome and Milan.$\delta_i^R,\delta_i^M$ only borrow from current obs in Rome and Milan.
+$$\delta_i^R\sim N(0,\frac{1}{\tau_\delta^R}),\delta_i^M\sim N(0,\frac{1}{\tau_\delta^M})$$
+$$1/\tau_{\delta}^R\sim Gamma(1,1),1/\tau_{\delta}^M\sim Gamma(1,1)$$
+Hence 
+$R_{i}$is the mean of daily PM10 levels for Rome
+$M_{i}$ is the mean of daily PM10 levels for Milan
+$\mu^R,$ is the mean of monthly PM10 levels for Rome
+$\mu^M$ is the mean  of monthly PM10 levels for Milan
+$\mu_I$ is the mean of country level in Italy.
+```{r}
+jags.data1=list(R1=PM10$Rome1,R2=PM10$Rome2,R3=PM10$Rome3,M1=PM10$Milan1,M2=PM10$Milan2 ,n=29, mdelta0=0)
+set.seed(12345)
+ jags_model1="model{
+for (i in 1:n){
+R1[i] ~ dnorm(muR+deltaR[i],tauR)
+R2[i] ~ dnorm(muR+deltaR[i],tauR)
+R3[i] ~ dnorm(muR+deltaR[i],tauR)
+M1[i] ~ dnorm(muM+deltaM[i],tauM)
+M2[i] ~ dnorm(muM+deltaM[i],tauM)
+deltaR[i] ~ dnorm(mdelta0, tau_deltaR)
+deltaM[i]~ dnorm(mdelta0, tau_deltaM)
+ #daily patterns
+R[i]=muR+deltaR[i]
+M[i]=muM+deltaM[i]
+}
+tauR ~ dgamma(1,1)
+tauM~ dgamma(1,1)
+tau_deltaR ~ dgamma(1, 1)
+tau_deltaM ~ dgamma(1, 1)
+sigmaR=1/tauR
+sigmaM=1/tauM
+sigma_deltaR=1/tau_deltaR
+sigma_deltaM=1/tau_deltaM
+muR ~ dnorm(muI,0.01)
+muM ~ dnorm(muI,0.01)
+muI ~ dnorm(mu,tauI)
+mu~dunif(30,40)
+tauI ~ dgamma(1,1)
+varianceI <- 1/tauI
+tau_Mnew=1/(sigmaM+sigma_deltaM)
+tau_Rnew=1/(sigmaR+sigma_deltaR)
+M_new ~ dnorm(muM,tau_Mnew)
+R_new ~ dnorm(muR,tau_Rnew)
+prob <- step(M_new-R_new-15)
+}"
+jags.param1=c("M[20]","M[22]","R[20]","R[22]","M_new","R_new","prob","muR","muM")
+jagsfit1 <- jags(data=jags.data1, n.chains=5, inits=NULL,
+                 parameters=jags.param1, n.iter=5000, n.burnin=1000, DIC=TRUE,
+                 model.file=textConnection(jags_model1))
+print(jagsfit1, intervals=c(0.025, 0.975))
+```
+
+### (10)
+The posterior mean for Milan at 10/22/2017 and 10/24/2017 are: 75.673 and 46.777.
+The posterior mean for Rome at 10/22/2017 and 10/24/2017 are: 32.531 and 14.602.
+
+### (11)
+The posterior 95% credible interval for Milan at 10/22/2017 and 10/24/2017 are: (68.07,83.199),(39.379,54.807). We can find that this model produce similar result as the first model. This indicates that this model could analyze the data in Milan properly.
+The posterior 95% credible interval for Rome at 10/22/2017 and 10/24/2017 are:(28.382,36.521), (10.394,18.76). We can find that the PM10 level in Rome is much smaller than the level in Milan at the same day.
+
+### (12)
+```{r}
+library(bayesplot)
+M20=as.numeric(unlist(as.mcmc(jagsfit1 )[,"M[20]"])); 
+M22=as.numeric(unlist(as.mcmc(jagsfit1 )[,"M[22]"]))
+R20=as.numeric(unlist(as.mcmc(jagsfit1 )[,"R[20]"])); 
+R22=as.numeric(unlist(as.mcmc(jagsfit1 )[,"R[22]"]))
+plot(density(M20,n=1500), type='l', xlab="",col="blue" ,main="", ylab="",ylim=c(0,0.2),xlim=c(0,100)) 
+lines(density(M22,n=1500),lty=1,col="red",lwd=5)
+lines(density(R20,n=1500),lty=2,col="lightblue",lwd=5)
+lines(density(R22,n=1500),lty=2,col="pink",lwd=5)
+mtext("PM10",line=3,side=1,cex=1.5)
+mtext("Posterior Density",line=2.5,side=2,cex=1.5)
+```
+we could find the posterior densities of PM10 concentration in 10/22/2017 in Milan centered around $76\mu g/m^3$ and exceeds the regulatory threshold ($50\mu g/m^3$),the posterior densities of PM10 concentration in Rome centered around $33\mu g/m^3$,far beyond the regulatory threshold.The posterior densities of PM10 concentration in 10/24/2017 centered around $47\mu g/m^3$ in Milan, the posterior densities of PM10 concentration in Rome centered around $15\mu g/m^3$.Because the regulatory intervention in Milan, the values of PM 10 levels in Milan in October have large fluctuation，the posterior densities of Milan is more flat than the posterior densities of Rome.
+
+### (13)
+```{r}
+R=as.numeric(unlist(as.mcmc(jagsfit1 )[,"M_new"])); 
+M=as.numeric(unlist(as.mcmc(jagsfit1 )[,"R_new"]))
+plot(density(R,n=1500), type='l', xlab="", main="", ylab="",ylim=c(0,0.04)) 
+lines(density(M,n=1500),lty=2,lwd=5)
+mtext("PM10",line=3,side=1,cex=1.5)
+mtext("Predictive Density",line=2.5,side=2,cex=1.5)
+```
+
+The plot is shown above, we could find that the posterior predictive densities in Milan is much flatter than the posterior predictive densities in Rome. 
+From my model, the prediction mean of PM10 level in Milan is 59.601 and its 95% credible interval is (7.518,111.391) and the prediction mean of PM10 level in Rome is 29.976 and 
+its 95% credible interval is (9.787,49.555) .
+And the probability that the PM10  level in Milan are $15 \mu g/m^3$ higher than in Rome is 69.6%.
