@@ -1,0 +1,266 @@
+##### 
+FEV
+
+### (a) exploratory data analysis
+viewing the data set,we have two continous variavles:age and height,two categorical variables:males and smoke.
+```{r}
+lung=read.table("/Users/jing/Desktop/205/FEV.txt",header=T)
+summary(lung)
+library(tidyverse)
+library(lsmeans)
+library(car)
+#relationship examine
+pairs(~FEV+Age+Hgt,labels=c("FEV","Age","Height"),data=lung)
+boxplot(FEV ~ Smoke,data=lung) 
+boxplot(FEV ~ Male,data=lung) 
+```
+We could find that FEV is positively associated with age, hieght.While smokers have higher FEV than nonsmoker on average.Males' FEV are slightly higher than females on average ,but it also have larger variance. 
+```{r}
+#interation
+ggplot(data = lung) +
+  geom_point(mapping = aes(x =Age, y = FEV))+
+  geom_smooth(mapping = aes(x =Age, y = FEV,color=Smoke, group=Smoke))
+
+ggplot(data = lung) +
+  geom_point(mapping = aes(x =Hgt , y = FEV))+
+  geom_smooth(mapping = aes(x =Hgt, y = FEV,color=Smoke, group=Smoke))
+
+boxplot(FEV ~ Smoke*Male,data=lung) 
+```
+From the ggplot, we could find that there is ineration between age and somke on FEV.
+
+### (b) 
+Prior construction
+we are consider Zellner’s g-prior for simplicity.
+$$\beta|\tau\sim N_r(\beta_0,\frac{g}{\tau}(X'X^{-1})),\tau\sim Gamma(a,b)$$
+g=n means prior has the equivalent weight of 1 observation(unit information)
+
+Then we do the predictor selection based on the value of DIC, BIC, LPML. the table as shown below:
+
+From the table, we could find that achive the biggest LPML and smallest DIC and BIC, in order to better interpret the model, i choose model 7, which LPML is-326.35 ,BIC is 687.206 and DIC is 654.775,the values are very similar with the biggest LPML and smallest BIC and DIC.
+
+```{r}
+library('rjags')
+library(R2jags)
+library(robustHD)
+lung=read.table("/Users/jing/Desktop/205/FEV.txt",header=T)
+attach(lung)
+FEV.st=standardize(FEV) 
+Age.st=standardize(Age) 
+Hgt.st=standardize(Hgt) 
+A2=Age.st^2
+AS=Age.st*Smoke
+H2=Hgt.st^2
+HS=Hgt.st*Smoke
+
+set.seed(123456)
+X.mat=model.matrix(~ Age.st+Hgt.st+as.factor(Male)+as.factor(Smoke)+AS+H2)
+C0inv=t(X.mat)%*% X.mat # Precision matrix
+jags.data=list( Y=FEV,
+                Xmat=X.mat,
+                r=dim(X.mat)[2],
+                n=dim(X.mat)[1], 
+                beta0=rep(0,dim(X.mat)[2]),
+                C0inv=C0inv,
+                gg=dim(X.mat)[1], # unit information prior
+                a=0.001, b=0.001)## diffuse prior
+model_reg <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+ beta[5]*Xmat[i,5]+beta[6]*Xmat[i,6]+beta[7]*Xmat[i,7]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0[1:r],(tau/gg)*C0inv[1:r,1:r]) # g prior 
+tau ~ dgamma(a,b)
+}"
+jags.param=c("beta","tau","CPOinv") 
+jags.fit <- jags(data=jags.data, parameters.to.save = jags.param,
+                model.file=textConnection(model_reg),
+                n.iter=20000, n.chains=1, n.burnin=5000, n.thin=1, DIC=T, digits=6)
+
+jags.fit$BUGSoutput$DIC
+## BIC
+n=654; r=7;
+pm_tau=jags.fit$BUGSoutput$summary["tau", "mean"]
+pm_coeff=jags.fit$BUGSoutput$summary[c("beta[1]","beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]"), "mean"]
+BIC1 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((FEV-(pm_coeff[1]+pm_coeff[2]*Age.st+pm_coeff[3]*Hgt.st +pm_coeff[4]*Male+pm_coeff[5]*Smoke+pm_coeff[6]*AS+pm_coeff[7]*H2))^2)+ (r+1)*log(n)
+BIC1
+## LPML
+CPO1 <-1/jags.fit$BUGSoutput$mean$CPOinv ## CPO is a vector of length n 
+LPML1 <- sum(log(CPO1))
+LPML1
+```
+
+convergence and model diagnostics
+```{r}
+jags.fit.mcmc <- as.mcmc(jags.fit)## dataframe with columns## deviance and theta
+plot(jags.fit.mcmc[,6])
+autocorr.plot(jags.fit.mcmc[,6])
+```
+The traceplot show the evidence of convergence. From autocorrelation plot,the chain show no long-range dependence.
+```{r}
+fitFEv<-X.mat%*%pm_coeff
+plot (fitFEv,fitFEv-lung$FEV)
+fitmodel=lm(FEV~Age.st+Hgt.st+as.factor(Male)+as.factor(Smoke)+AS+H2)
+par(mfrow=c(2,1))
+plot(fitmodel$fitted.value,fitmodel$residuals)
+qqnorm(fitmodel$residuals)
+qqline(fitmodel$residuals)
+```
+From the residual plots, we could see that residuals are evenly distrubuted around 0,on the right hand side, it seems an increased trend of residuals as fitted value increased.But it is possible that no so much data samples with large FEV.
+
+From the QQ plot,we can see that it is approximately normal so it satistifes the assumption of normality of linear regression.
+
+###(c) 
+Posterior inference
+```{r}
+jags.interest=c("beta","tau") 
+jagsfit <- jags(data=jags.data, parameters.to.save = jags.interest,
+                 model.file=textConnection(model_reg),
+                 n.iter=20000, n.chains=1, n.burnin=5000, n.thin=1, DIC=T, digits=6)
+
+jagsfit$BUGSoutput$summary[c("beta[1]", "beta[2]", "beta[3]", "beta[4]", "beta[5]","beta[6]","beta[7]","tau"),]
+
+```
+The posteior inferences for regression parameters is shown as table below.
+
+From the table, we could find that $E(\beta_{Smoke}|data)=-0.037$, the value is very close to 0,$P(\beta_{Smoke}<0|data)=50%$.Hence, we could consider that smoke doen't have direct negative effect on FEV since its posterior expectation is very close to 0 and the probability of its posteior coefficient is negative is 50%.
+
+$E(\beta_{Smoke*Age}|data)=-0.086$,$75%<P(\beta_{Smoke*Age}<0|data)<95%$.The  posteior expectation of the smoke and age interaction's coefficient is -0.086 and the probability of its posteior coefficient is negative is at least 75%.
+We could conclude that there is an inteaction effect between age and smoke on FEV.If you are a smoker, the FEV would increaced less as age increased.
+
+We could achive four subpopulation group from the regression model, females nonsomker,females smoker, males nonsmoker,males smoker. 
+```{r}
+beta<-jags.fit$BUGSoutput$summary[c("beta[1]","beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]"),1]
+# for nonsomker female
+FNmeanFEV<- beta[1]+beta[2]*mean(Age.st)+beta[3]*mean(Hgt.st)+beta[7]*mean(H2)
+#for smkoer female
+FSmeanFEV<- beta[1]+(beta[2]+beta[6])*mean(Age.st)+beta[3]*mean(Hgt.st)+beta[5]+beta[7]*mean(H2)
+# for nonsomker male
+MNmeanFEV<- beta[1]+beta[2]*mean(Age.st)+beta[3]*mean(Hgt.st)+beta[4]+beta[7]*mean(H2)
+#for smoker male
+MSmeanFEV<- beta[1]+(beta[2]+beta[6])*mean(Age.st)+beta[3]*mean(Hgt.st)+beta[4]+beta[5]+beta[7]*mean(H2)
+```
+the table is shown below
+
+
+
+From the table, we could find that expectation of FEV of female nonsmokers are higher than the expectation of FEV of female smokers.The expectation of FEV of male nonsmokers are higher than the expectation of FEV of male smokers.
+
+we could find that most of adolescents start smoking form age 13, so I study the relative means of smoking betwwen age 13 to age 19.
+```{r}
+for(i in 9:19){
+  i.st=(i-mean(lung$Age))/sd(lung$Age)
+  FNmeanFEV[i]<- beta[1]+beta[2]*mean(i.st)+beta[3]*mean(Hgt.st)+beta[7]*mean(H2)
+  FSmeanFEV[i]<- beta[1]+(beta[2]+beta[6])*mean(i.st)+beta[3]*mean(Hgt.st)+beta[5]+beta[7]*mean(H2)
+  MNmeanFEV[i]<- beta[1]+beta[2]*mean(i.st)+beta[3]*mean(Hgt.st)+beta[4]+beta[7]*mean(H2)
+  MSmeanFEV[i]<- beta[1]+(beta[2]+beta[6])*mean(i.st)+beta[3]*mean(Hgt.st)+beta[4]+beta[5]+beta[7]*mean(H2)
+}
+
+RMF<-FNmeanFEV/FSmeanFEV
+RMM<-MNmeanFEV/MSmeanFEV
+```
+The table is present below:
+
+
+From the table,we could find that there is increased trend of risk means as age increased.That means Smomking  indeed have some negative effect on FEV as aged increased.
+
+Based on the posterior inferences for regression parameters and suppopulation means analysis, it is shown that smoking has negative effect on FEV as age increased.
+
+###(d)
+We have four types of adolescents infromation from the expert, we could use our model to predict the normal FEV ranges for them :
+```{r}
+#for 18 years old female smokers,70 inches tall
+a1=(18-mean(lung$Age))/sd(lung$Age);h1=(70-mean(lung$Hgt))/sd(lung$Hgt)
+#for 16 years old male nonsmokers,70 inches tall
+a2=(16-mean(lung$Age))/sd(lung$Age);h2=(70-mean(lung$Hgt))/sd(lung$Hgt)
+#for 12 years old male nonsmokers,60 inches tall
+a3=(12-mean(lung$Age))/sd(lung$Age);h3=(60-mean(lung$Hgt))/sd(lung$Hgt)
+#for 13 years old male smokers,66 inches tall
+a4=(13-mean(lung$Age))/sd(lung$Age);h4=(66-mean(lung$Hgt))/sd(lung$Hgt)
+#for 15 years old male nonsmokers,66 inches tall.
+a5=(15-mean(lung$Age))/sd(lung$Age);h5=(66-mean(lung$Hgt))/sd(lung$Hgt)
+set.seed(123456)
+model_pred <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+ beta[5]*Xmat[i,5]+beta[6]*Xmat[i,6]+beta[7]*Xmat[i,7]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0[1:r],(tau/gg)*C0inv[1:r,1:r]) # g prior 
+tau ~ dgamma(a,b)
+#prediction
+
+mu18fs <-  beta[1]+(beta[2]+beta[6])*a1+beta[3]*h1+beta[5]+beta[7]*h1^2
+FEV18fs ~ dnorm(mu18fs,tau)
+#for 16 years old males nonsmokers,70 inches tall
+
+mu16mns <- beta[1]+beta[2]*a2+beta[3]*h2+beta[4]+beta[7]*h2^2 
+FEV16mns ~ dnorm(mu16mns,tau)
+
+mu12mns <- beta[1]+beta[2]*a3+beta[3]*h3+beta[4]+beta[7]*h3^2 
+FEV12mns ~ dnorm(mu12mns,tau)
+
+mu13ms <- beta[1]+(beta[2]+beta[6])*a4+beta[3]*h4+beta[4]+beta[5]+beta[7]*h4^2 
+FEV13ms ~ dnorm(mu13ms,tau)
+
+mu15mns <- beta[1]+beta[2]*a5+beta[3]*h5+beta[4]+beta[7]*h5^2 
+FEV15mns ~ dnorm(mu15mns,tau)
+}"
+jags.datap=list( Y=FEV,
+                Xmat=X.mat,
+                r=dim(X.mat)[2],
+                n=dim(X.mat)[1], 
+                beta0=rep(0,dim(X.mat)[2]),
+                C0inv=C0inv,
+                gg=dim(X.mat)[1], # unit information prior
+                a=0.1, b=0.1,a1=a1,h1=h1,a2=a2,h2=h2,a3=a3,h3=h3,a4=a4,h4=h4,a5=a5,h5=h5)## diffuse prior
+jags.param=c("FEV18fs","FEV16mns", "FEV12mns","FEV13ms","FEV15mns") 
+jags.predict <- jags(data=jags.datap, parameters.to.save = jags.param,
+                 model.file=textConnection(model_pred),
+                 n.iter=20000, n.chains=1, n.burnin=5000, n.thin=1, DIC=T, digits=6)
+
+```
+From the table, we could find that our posterior predictive distribution satistifies the expert's experience,that means our model could represents that five types of adolescents well.
+
+
+###(e)
+We change our model from $\tau \sim Gamma(0.001,0.001)$ to $\tau \sim Gamma(0.1,0.01)$ to do the sensitivity analysis:
+```{r}
+set.seed(123456)
+jags.datas=list( Y=FEV,
+                Xmat=X.mat,
+                r=dim(X.mat)[2],
+                n=dim(X.mat)[1], 
+                beta0=rep(0,dim(X.mat)[2]),
+                C0inv=C0inv,
+                gg=dim(X.mat)[1], # unit information prior
+                a=0.1, b=0.1)## diffuse prior
+model_reg1 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+ beta[5]*Xmat[i,5]+beta[6]*Xmat[i,6]+beta[7]*Xmat[i,7]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0[1:r],(tau/gg)*C0inv[1:r,1:r]) # g prior 
+tau ~ dgamma(a,b)
+}"
+jags.param=c("beta","tau") 
+jags.fit1 <- jags(data=jags.datas, parameters.to.save = jags.param,
+                 model.file=textConnection(model_reg),
+                 n.iter=20000, n.chains=1, n.burnin=5000, n.thin=1, DIC=T, digits=6)
+
+jags.fit1.mcmc <- as.mcmc(jags.fit1)## dataframe with columns## deviance and theta
+plot(jags.fit1.mcmc[,6])
+autocorr.plot(jags.fit1.mcmc[,6])
+
+```
+The posteior inference for regression parameters is shown as table below:
+
+
+
+From the table, we could find that the values of posteior inference for regression paramter are similar with previous model, and the model still converges well and show no sign of dependence on chain. This show that when we change the hyperarmter, its results doen't change significantly,our model is stable enough.
+
+###(f)
+Summary:
+
