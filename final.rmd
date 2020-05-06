@@ -1,0 +1,586 @@
+## problem 1
+### a 
+
+For this problem, we consider a linear regression of daily total electricity consumption with respect to covariates. Let $y_i$ represents the daily electricity consumption of household i in 11/15/2009. $\mu_i$ represents the expectation of daily total electricity consumption of household i. $X\beta$ represents the subset of the covariates.
+
+$y_i \sim N(\mu_i,\sigma^2)$,  $\mu_i=X\beta$
+
+$y_i=X\beta+\epsilon_i$,  $\epsilon_i\sim N(0,\sigma^2)$
+
+### b
+
+A brief summary of the data.
+
+```{r,echo=FALSE, fig.width=8, fig.height=4}
+data=read.table("../Data/IrishElectricity.txt",header=T)
+attach(data)
+
+AR<-Attitude.Reduce.Bill
+AE<-Attitude.Environment
+Room<-Bedroom
+Edu<-Education
+
+# exploratory summary
+myvars <- c("V1","Age", "Attitude.Reduce.Bill", "Attitude.Environment", "Education", "Resident","Bedroom")
+summary(data[myvars])
+
+# histogram of V1 and boxplot of covariates
+par(mfrow=c(1,2))
+hist(data$V1,xlab="energy consumption on 11/15/2009",
+     ylab="frequency",main="Histogram of energy consumption")
+
+myvars <- c("Age", "Attitude.Reduce.Bill", "Attitude.Environment", "Education", "Resident","Bedroom")
+mydata <- data[myvars]
+colnames(mydata) <- c("Age", "AR", "AE", "Education", "Resident","Room")
+boxplot(mydata)
+```
+
+There are several things worth noticing. 
+
+(1) For the continuous response variables V1, the distribution is not normal and kind of right-skewed with mean 27.648, standard deviation 13.348.
+
+(2) For both Attitude.Reduce.Bill and Attitude.Environment, more than 75% households are 1. This means most people feel nothing about reducing bill and the environment.
+
+(3) The median of Resident is 2 and the median of Bedroom is 4.
+
+Then I draw pair plots and correlation plot to explore the relation between all variables. 
+
+```{r,echo=FALSE, fig.width=5, fig.height=4}
+pairs(~V1+Age+Resident+AR+AE+Education+Bedroom,labels=c("V1","age","resident","AR","AE","Edu","Bedroom"),data=data)
+```
+
+```{r,echo=FALSE, message=FALSE, fig.width=4, fig.height=3}
+library(corrplot)
+fullmod <- lm(V1 ~Age+Resident+AR+AE+Edu+Room, data)
+fullmodMat <- model.matrix(fullmod) 
+fullmodMat <- fullmodMat[,-1] 
+fullmodMat <- cbind(data$V1,fullmodMat) 
+colnames(fullmodMat)[1] <- "v1"
+corMat <- cor(fullmodMat) 
+corrplot(corMat)
+```
+
+From the pair plots and correlation plot, we could find Room, Resident and Education are positively associated with V1, Attitude-Environment, Attitude-Reduce Bill are negative associated with V1. Since Age has no correlation with V1, we may not consider the Age in the model. The pair plots also shows that are no quadratic terms of these covariates.
+
+### c
+
+For standard improper prior (SIR), the pro is that the posterior results mimic the usual frequentist results and the credible intervals under SIR prior are identical to the frequntist confidence intervals. The con is obvious: it is improper since it can’t be integrated to 1. So it can not conduct hypothesis testing because of Jeffreys–Lindley paradox. Also it can not be used in Rjags.
+
+The proper independent reference prior is a approximation for SIR in a well defined form. The pros are that (1) it has a proper probability distribution and very handy to use it in practice; (2) The prior can be used in the primary data analysis or in a sensitivity analysis when an informative prior is available. The cons are that it is still non-informative, it did not elict the expert infromation.
+
+### d
+
+The g-prior appears as a data-dependent prior through its dependence on X. Assuming that the design matrix X is known and fixed, g-prior is obtained by setting
+
+$\beta|\tau\sim N(\beta_0,\frac{g}{\tau}(X'X)^{-1})$,  $\tau\sim Gamma(a,b)$ 
+
+$\beta_0=(X'X)^{-1}X'Y$ or more often simply $\beta_0=0$
+
+The pros are that (1) easy math; (2) the variance of $\beta|\tau$ resembles that of the estimate $\beta_{MLE}$.
+
+The cons are that (1) when g goes to infinity, the infulence of the prior vanish and brings back the Lindley paradox: null model is always perferred to any other model. (2) it’s hard to decide the value of g sometimes.
+
+### e
+
+For these three cases given by question, the last two cases are both g=n in our model, since $r^2<n$. Compared g=1 with g=n, I suggest g=n here, since g prior is non-informative, the information it could provide is limited. Hence the weight we give to prior is better to be conservative. In this case, g=n which means prior has the equivalent weight of one observation is better.
+
+### f
+
+In order to determine what variables to include in our regression model, we can use houseshoe Shrinkage priors to obtain model-based choice of variable selection and gain some knowledge about the variables. For simple expression, I write Attitude-Reduce Bill as AR, Attitude-Environment as AE.
+
+```{r,echo=FALSE, message=FALSE, results='hide', warning=FALSE, eval=FALSE}
+library(horseshoe)
+library(kableExtra)
+set.seed(1234)
+
+X.mat<-model.matrix(~Age+Resident+AR+AE+Edu+Room)
+
+irish.horseshoe=horseshoe(V1, X.mat, method.tau = "truncatedCauchy", method.sigma = "Jeffreys", burn=1000)
+n=13; prefix="beta"; suffix=seq(1:n); index=paste(prefix, suffix, sep=".")
+quantile.horseshoe=t(apply(irish.horseshoe$BetaSamples, 1, quantile, prob=c(0.025, 0.5, 0.975))) 
+post.mean.horseshoe=apply(irish.horseshoe$BetaSamples, 1, mean)
+post.summary.horseshoe=cbind(index, post.mean.horseshoe, quantile.horseshoe)
+```
+
+Below is the houseshoe Shrinkage result. The table presents the posterior distribution of coefficients.
+
+|parameter|post.mean|0.025|0.5|0.975|
+|---- | ------ | --- | --- | --- |
+|intercept |0.287|-5.984|0.077|7.198|
+|Age |-0.154|-1.351|-0.081|0.865|
+|Resident |1.170|-0.388|1.102|3.183|
+|AR |-0.781|-3.800|-0.540|1.474|
+|AE |-1.042|-4.030|-0.799|1.021|
+|Edu|0.353|-0.779|0.218|1.866|
+|Room|7.132|5.061|7.144|9.164|
+
+From the posterior distribution of coefficients of all predictors, we know that Room and Resident is important for the model since their posteior mean is far from 0, and the$P(\beta_{Room}|data)>0$ is 100% and $P(\beta_{Resident}|data)>0$ is 97.5% at least. Age has little effect on V1 since its posterior mean is very close to 0 and the probability of its coefficient is non negative is around 50% We also find the fact in the exploratory analysis. Predictors of Attitude-Reduce Bill, Attitude-Environment, Education need further discussed.
+
+Based on this knowledge, I start on the model that includes Resident, Room, AR, AE, Edu, and then by tentively removing AE, AR, Education based on criteria like BIC, DIC and LPML to improve the model. I use g prior where g=n here. Trying to delete one predictor, it comes that deleting AR can improve the most. Then we have the model that contains Resident, Room, AE, Edu, then if we try to delete Edu, the model will improve the most. Below is the results.
+
+|            Model         | LPML| BIC | DIC |
+|-----------------------------------|------|----|--------|
+| Resident, Room, AR, AE, Edu | -589.9039|1234.056 | 1179.07 |
+| Resident, Room, AR, Edu | -589.1871 | 1196.09 | 1178.013 |
+| Resident, Room, AE, Edu | -589.1397| 1195.242 | 1177.375 |
+| Resident, Room, AR, AE|-604.7978 |1224.56 | 1209.475 |
+| Resident, Room, Edu | -589.2713 |1192.814 | 1177.951 |
+| Resident, Room, AE | -588.2207 |1190.926 | 1175.968 |
+| Resident, Room, AR | -588.2214 |1191.461 | 1176.648 |
+| Resident, Room | -588.3029 |1188.306 | 1176.392 |
+
+Considering the selection criteria performance and difficulty to interpret, we decide to choose the model with predictors Room, Resident, Attitude-Environment, Education as our final model.
+
+We also compare different prior construction using our final model. It is shown that zeller's g prior(g=n) performe best!
+
+|            Prior         | LPML| BIC | DIC |
+|-----------------------------------|------|----|--------|
+| g prior g=n|-589.1397 |1195.242 | 1177.375 |
+| g prior g=1 |-663.2037| 1350.755 |1402.889 |
+| Independent prior|-589.2063| 1195.144 |1177.571|
+
+### g
+
+We run the final model through Rjags, the posterior inference for regression parameters is shown below.
+
+```{r,message=FALSE}
+library(R2jags)
+set.seed(1234)
+
+X.mat1=model.matrix(~Resident+AE+Edu+Room)
+C0inv=t(X.mat1)%*% X.mat1 # Precision matrix
+
+jags.data1=list(Y=V1,Resident=Resident,Edu=Edu,
+                Xmat=X.mat1,r=dim(X.mat1)[2],n=dim(X.mat1)[1], 
+                beta0=rep(0,dim(X.mat1)[2]),C0inv=C0inv,
+                gg=dim(X.mat1)[1], a=0.001, b=0.001) 
+
+model_reg <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2]+beta[3]*Xmat[i,3]+beta[4]*Xmat[i,4]
++beta[5]*Xmat[i,5]}
+beta[1:r] ~ dmnorm(beta0[1:r],(tau/gg)*C0inv[1:r,1:r]) # g prior 
+tau ~ dgamma(a,b)
+
+# compute mean of sub-population
+HELR=beta[1]+beta[2]*mean(Resident)+beta[3]*5+beta[4]*mean(Edu)+beta[5]*5
+HESR=beta[1]+beta[2]*mean(Resident)+beta[3]*5+beta[4]*mean(Edu)+beta[5]*3
+LELR=beta[1]+beta[2]*mean(Resident)+beta[3]*1+beta[4]*mean(Edu)+beta[5]*5
+LESR=beta[1]+beta[2]*mean(Resident)+beta[3]*1+beta[4]*mean(Edu)+beta[5]*3
+
+# test relevence of education
+p_edu <- step(beta[4])
+}"
+
+jags.param1=c("beta","tau","p_edu") 
+jags.param2=c("HELR","HESR","LELR","LESR") 
+jags.fit1 <- jags(data=jags.data1, parameters.to.save = jags.param1,
+                 model.file=textConnection(model_reg),
+                 n.iter=10000, n.chains=3, n.burnin=5000, n.thin=1, DIC=T, digits=6)
+print(jags.fit1)
+```
+
+Thus, $\beta_{Resident}$ has mean 1.703, 95% Credible Interval (-0.298, 3.723). $\beta_{AE}$ has mean -2.364, 95% Credible Interval (-5.341,0.576). $\beta_{Edu}$ has mean 0.739, 95% Credible Interval (-1.064,2.509). $\beta_{Room}$ has mean 6.996, 95% Credible Interval (4.596,9.330).
+
+We also examine whether the model has reached convergence. As the plots shown below, model has reached convergence.
+
+```{r,echo=FALSE, fig.width=5, fig.height=3}
+jags.fit1.mcmc <- as.mcmc(jags.fit1)
+gelman.plot(jags.fit1.mcmc[,2])
+```
+
+The posterior inference for regression parameters shows the level of Attitude- Environment and Room have strong association with the daily electricity consumption. Hence, we defined the population as four sub population based on the Attitude-Environment is strong or weak and the amounts of room is larger or small. From the exploratory data analysis in Problem 1(b), we define the attitude to environment equals to 5 as strong, below 5 as weak; house with 5 bedrooms as large, house with 3 bedroom as small.
+
+Below is the expectation and range of daily electricity consumption estimation for these four different subpopulations. It's obvious that the effect of the number of Room is more influential than the Attitude to the Environment.
+
+| Subpopulation  | Large house| Small house |
+|-----------------------------------|------|----|
+| Strong environment attitude|28.34 (16.41,39.98)| 14.35(3.4,25.30)|
+| Weak environment attitude|37.80(33.91,41.58)| 23.80(21.23,26.37)|
+
+### h
+From the posterior inference for the coefficient of the Education, the posterior probability of the effect of Education is non negative is 79.4%. 
+
+In conclusion, Education is associated with the daily electricity consumption. Higher level Education is associated with higher daily electricity consumption.
+
+## Problem 2
+### a
+
+The main features of LPML is evaluating models through the accuracy of its predictions. The advantage is that (1) it is very easy to compute from MCMC output. The possible disadvantages are (1) it violates the likelihood principle, e.g., the LPML is different for $y_i \sim LN(\mu,\sigma^2)$ and $log(y_i) \sim N(\mu, \sigma^2)$ which are equivalent models. (2) it's only appropriate to compare models that have a common measurement scale for the data y and the same sampling scheme.
+
+We can run the regression model without and with interaction, and compare their LPML.
+
+```{r, echo=FALSE, message=FALSE, results='hide'}
+#without interaction
+library(R2jags)
+set.seed(1234)
+X.mat.wo=model.matrix(~Age+Resident+Edu)
+
+C0inv1.wo=t(X.mat.wo)%*% X.mat.wo # Precision matrix
+jags.data.wo=list( Y=V1,Xmat=X.mat.wo,r=dim(X.mat.wo)[2],
+                   n=dim(X.mat.wo)[1], beta0=rep(0,dim(X.mat.wo)[2]),
+                   C0inv=C0inv1.wo,gg=dim(X.mat.wo)[1], c=0.001) 
+
+model_reg.wo <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0[1:r],(tau/gg)*C0inv[1:r,1:r]) # g prior 
+tau ~ dgamma(c,c)
+}"
+
+jags.param=c("beta","tau","CPOinv") 
+jags.fit.wo <- jags(data=jags.data.wo, parameters.to.save = jags.param,
+                    model.file=textConnection(model_reg.wo),
+                    n.iter=20000, n.chains=1, n.burnin=5000, n.thin=1, DIC=T, digits=6)
+```
+
+```{r, echo=FALSE, results='hide'}
+#with interaction
+set.seed(1234)
+RE<-Resident*Education
+X.mat.w=model.matrix(~Age+Resident+Edu+RE)
+
+C0inv.w=t(X.mat.w)%*% X.mat.w # Precision matrix
+jags.data.w=list( Y=V1, Xmat=X.mat.w, r=dim(X.mat.w)[2], n=dim(X.mat.w)[1], 
+                   beta0=rep(0,dim(X.mat.w)[2]), C0inv=C0inv.w,
+                   gg=dim(X.mat.w)[1], c=0.001)
+model_reg.w <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+ beta[5]*Xmat[i,5]
+
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0[1:r],(tau/gg)*C0inv[1:r,1:r]) # g prior 
+tau ~ dgamma(c,c)
+}"
+
+jags.param=c("beta","tau","CPOinv") 
+jags.fit.w<- jags(data=jags.data.w, parameters.to.save = jags.param,
+                   model.file=textConnection(model_reg.w),
+                   n.iter=20000, n.chains=1, n.burnin=5000, n.thin=1, DIC=T, digits=6)
+```
+
+```{r, echo=FALSE}
+# compare LPML
+CPO.wo <-1/jags.fit.wo$BUGSoutput$mean$CPOinv 
+LPML.wo <- sum(log(CPO.wo))
+
+CPO.w <-1/jags.fit.w$BUGSoutput$mean$CPOinv
+LPML.w <- sum(log(CPO.w))
+
+t(list(LPML.without=LPML.wo, LPML.with=LPML.w))
+```
+
+Since larger LPML wins, so the model without interaction is better than the model with interaction.
+
+### b
+
+Bayes factor measures the relative difference of probability between two models given the data. A neat features of Bayes factors is their transitivity. The advantage is that (1) It's easy to compute Bayes Factor by using post-MCMC compositional sampling (Monte Carlo) techniques based on the output of the MCMC chains. (2) can be used in general also to test two competing hypotheses, besides two competing models. One criticism of Bayes Factors is the (implicit) assumption that one of the competing models (M1 or M2) is correct. What's more, for complex models, the post-MCMC compositional sampling (Monte Carlo) may be very inefficient and computationally costly.
+
+The rule of thumb is applied with respect to 2LBF, which is 2 times the log of BF. When it’s from 0 to 2 the difference, the strength of evidence is not really worth considering. When it’s 2 to 6, the evidence is positive. When it’s 6 to 10, the evidence is strong and when it’s greater than 10, the evidence is very strong. 
+
+Through computing, the BF comparing the model without interaction to the model with interaction is 0.49 as below. So the strength of evidence of model without interaction is not really worth considering.
+
+```{r, echo=FALSE}
+PBF.wo_w <- exp(LPML.w-LPML.wo)
+t(list(BF_without_with=PBF.wo_w))
+```
+
+### c
+
+Since we use the g prior and choose to set g=n, we have only one hyperparamater: c (in model $\tau \sim Gamma(c,c)$). In the original model, we set c=0.001. From the result below, the mean of $\beta_0=13.767$, $\beta_{age}=0.007$, $\beta_{resident}=2.95$, $\beta_{education}=1.532$, $\tau=0.006$, $DIC=1210.6$.
+
+```{r}
+set.seed(1234)
+X.mat.wo=model.matrix(~Age+Resident+Edu)
+
+C0inv1.wo=t(X.mat.wo)%*% X.mat.wo # Precision matrix
+jags.data.wo=list( Y=V1,Xmat=X.mat.wo,r=dim(X.mat.wo)[2],
+                   n=dim(X.mat.wo)[1], beta0=rep(0,dim(X.mat.wo)[2]),
+                   C0inv=C0inv1.wo,gg=dim(X.mat.wo)[1], a=0.001, b=0.001) 
+
+model_reg.wo <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]
+}
+beta[1:r] ~ dmnorm(beta0[1:r],(tau/gg)*C0inv[1:r,1:r]) # g prior 
+tau ~ dgamma(a,b)
+
+}"
+
+jags.param=c("beta","tau") 
+jags.fit.wo <- jags(data=jags.data.wo, parameters.to.save = jags.param,
+                    model.file=textConnection(model_reg.wo),
+                    n.iter=20000, n.chains=1, n.burnin=5000, n.thin=1, DIC=T, digits=6)
+
+print(jags.fit.wo)
+```
+
+now we change the hyperparamaters. The sensitivity analysis results are shown below.
+
+|              |hyperparamater|$\beta_0$|$\beta_{age}$|$\beta_{resident}$|$\beta_{education}$|$\tau$|$DIC$|
+|--------------|-----------|-----|------|------|------|------|------|
+|              |c=0.1    |13.778|-0.003|2.955|1.538|0.006|1210.8|
+|              |c=0.01   |13.786|-0.003|2.958|1.534|0.006|1210.7|
+|original model|c=0.001  |13.769|-0.004|2.953|1.534|0.006|1210.7|
+|              |c=0.0001 |13.735|0.009|2.948|1.538|0.006|1210.6|
+|              |c=0.00001|13.767|0.007|2.95|1.532|0.006|1210.6|
+
+Thus, when c decreases, the mean of $\beta$ change a little bit, $\tau$ and $DIC$ nearly have no change.  
+
+### d
+
+```{r, echo=FALSE}
+set.seed(1234)
+X.mat.wo=model.matrix(~Age+Resident+Edu)
+
+C0inv1.wo=t(X.mat.wo)%*% X.mat.wo # Precision matrix
+jags.data.wo=list( Y=V1,Xmat=X.mat.wo,r=dim(X.mat.wo)[2],
+                   n=dim(X.mat.wo)[1], beta0=rep(0,dim(X.mat.wo)[2]),
+                   C0inv=C0inv1.wo,gg=dim(X.mat.wo)[1], c=0.001) 
+
+model_reg.wo <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]
+}
+beta[1:r] ~ dmnorm(beta0[1:r],(tau/gg)*C0inv[1:r,1:r]) # g prior 
+tau ~ dgamma(c,c)
+
+## Predict the energy consumption
+pred_med ~ dnorm(mu_pred_med,tau)
+pred_4r ~ dnorm(mu_pred_4r,tau)
+mu_pred_med <- beta[1] + beta[2]*4 + beta[3]*2 + beta[4]*4
+mu_pred_4r <- beta[1] + beta[2]*4 + beta[3]*4 + beta[4]*4
+}"
+
+jags.param=c("pred_med","pred_4r") 
+jags.fit.wo <- jags(data=jags.data.wo, parameters.to.save = jags.param,
+                    model.file=textConnection(model_reg.wo),
+                    n.iter=20000, n.chains=1, n.burnin=5000, n.thin=1, DIC=T, digits=6)
+
+print(jags.fit.wo)
+```
+
+From the exploratory data analysis in Problem 1(b), we've already known that the median age is 4, median number of residents is 2, median level of education is 4. 
+
+From the result of the prediction, for the household with median age, residents and education, the median level of their energy comsumption is 25.779, 95% credible interval is (-0.221, 52.331). If the household had 4 residents, then the median level of their energy comsumption is 31.716, 95% credible interval is (5.443, 57.814). Since the median residents is 2, if it raises to 4, the energy comsumption also increases.
+
+## Problem 3
+### a
+For this problem, we consider a hierarchical model. Let $y_{ij}$ be the electricity consumption for household i in day j. we then conduct a linear regression on $y_{ij}$. $\beta_{ij}$ represents a household level beta in day j. $\beta_j$ represents a population level beta in day j. For simplicity and interest of time, we use a diffuse proper reference prior here. Since in Problem 1 we already do the model selection, we here use four predictors: Resident, Attitude-Environment, Education and Bedroom. 
+
+$Y_{ij}|\beta_{ij},\tau_j^H \sim N(X_{ij}\beta_{ij},1/\tau_j^H)$,  $\tau_j^H \sim Ga(c,c)$
+
+$\beta_{ij}=(\beta^0_{ij},\beta^{resident}_{ij},\beta^{AE}_{ij},\beta^{education}_{ij},\beta^{bedroom}_{ij})$
+
+$\beta_{ij}|\beta_j,\tau^P \sim N(\beta_j,1/\tau^P)$,  $\tau^P \sim Ga(d,d)$
+
+$\beta_j \sim N(0,b)$
+
+Here, we set b=1000, c=d=0.001.
+
+### b
+
+To remain consistent with Problem 1, we use 
+
+```{r,eval=FALSE}
+set.seed(1234)
+X.mat3=model.matrix(~Resident+AE+Edu+Room)
+
+jags.data3=list(Y=data[,7:127], nhouseholds=151, ndays=121, Xmat=X.mat3)
+
+model_string3 = "
+model {
+for (i in 1:nhouseholds) {
+for (j in 1:ndays){
+Y[i,j] ~ dnorm(m[i,j], tau[j])
+m[i,j] <- beta_h1[i,j] + beta_h2[i,j] * Xmat[i,2] + beta_h3[i,j] * Xmat[i,3] +
+beta_h4[i,j] *  Xmat[i,4] + beta_h5[i,j] *  Xmat[i,5] 
+}
+}
+
+for (j in 1:ndays) {
+for (i in 1:nhouseholds){
+beta_h1[i,j] ~ dnorm(beta_p1[j], tau_p)
+beta_h2[i,j] ~ dnorm(beta_p2[j], tau_p)
+beta_h3[i,j] ~ dnorm(beta_p3[j], tau_p)
+beta_h4[i,j] ~ dnorm(beta_p4[j], tau_p)
+beta_h5[i,j] ~ dnorm(beta_p4[j], tau_p)
+
+}
+beta_p1[j] ~ dnorm(0,0.001)
+beta_p2[j] ~ dnorm(0,0.001)
+beta_p3[j] ~ dnorm(0,0.001)
+beta_p4[j] ~ dnorm(0,0.001)
+beta_p5[j] ~ dnorm(0,0.001)
+tau[j] ~ dgamma(0.001,0.001)
+}
+
+tau_p ~ dgamma(0.001,0.001)
+}
+"
+
+jags.param3 <- c("beta_p2","beta_h2")
+jags.fit3 <- jags(jags.data3, parameters.to.save=jags.param3,
+                  model.file=textConnection(model_string3),n.chains=3, 
+                  n.iter=50000, n.thin=20, n.burnin=10000)
+```
+
+```{r, echo=FALSE, eval=FALSE, fig.width=5, fig.height=3}
+# check DIC
+jags.fit3$BUGSoutput$DIC
+
+# check convergence
+jags.fit3.mcmc <- as.mcmc(jags.fit3)
+autocorr.plot(jags.fit3.mcmc[,101])
+gelman.plot(jags.fit3.mcmc[,101])
+```
+
+![](../Pic/p3auto2.png)
+
+Since the model is not stable and shows some autocorrelation, we increase the number of iteration and thinning. By checking the DIC and examine whether the model has reached convergence, it's shown that the model have large DIC, and still some evidence of autocorrelation.
+
+The reason may be that the model has beta for every household everyday, so we conduct a regression based only on one data point (e.g., there are 151*121 $\beta^{bedroom}_{ij}$, and we compute $\beta^{bedroom}_{ij}$ bases only on one observation $(X_{ij},Y_{ij})$). So the model fits not well.
+
+```{r, echo=FALSE, eval=FALSE, fig.width=7, fig.height=4}
+# plot
+beta_h2_30=rep(NA, 121)
+beta_h2_83=rep(NA, 121)
+beta_h2_91=rep(NA, 121)
+beta_p2=rep(NA, 121)
+for(i in 1:121){
+  beta_h2_30[i]=mean(jags.fit3$BUGSoutput$sims.matrix[,paste("beta_h2[30,", i, "]", sep="")])
+  beta_h2_83[i]=mean(jags.fit3$BUGSoutput$sims.matrix[,paste("beta_h2[83,", i, "]", sep="")])
+  beta_h2_91[i]=mean(jags.fit3$BUGSoutput$sims.matrix[,paste("beta_h2[91,", i, "]", sep="")])
+  beta_p2[i]=mean(jags.fit3$BUGSoutput$sims.matrix[,paste("beta_p2[", i, "]", sep="")])
+}
+
+x=seq(1,121,1)                                                                 
+plot(x,beta_h2_30,type='l',col="red",lwd=2,ylim=c(0,8),xlab="time", 
+     ylab="effect of Residents on Consumptions",
+     main="time-varying effect of Residents on Consumptions")
+lines(x,beta_h2_83,col="orange",lwd=2)
+lines(x,beta_h2_91,col="blue",lwd=2)
+lines(x,beta_p2,col="black",lwd=2)
+
+legend("topright",legend=c("households # 30","households # 83","households # 91","population"),lwd=c(2,2,2,2),col=c("red","orange","blue","black"))
+```
+
+![](../Pic/p3plot.png)
+
+The effect of the number of residents on the daily consumption is $\beta_{resident}$ in the model. $\beta_{resident}$ can be explained as for every one person increase of residents, the increase of mean daily consumption holding other variable unchanged. Thus it measures the average consumption for a new resident in the household or population.
+
+From the plot, we can find that starting from 09/15/2009, the population level average consumption for a resident bounces between 2 to 3 and arrives a small peak at 4 in 12/04/2009. Then it begins to increase sharply in the mid December and reaches the hightest at 6 on 12/24/2009, which is the Christmas Eve. After that it sharply decreases until early January. In the next 2 more months, it returns to a stable level around 3. 
+
+This meets our common sense. As Christmas gets closer, people get together and have fun in the holidays. They cook delicious food, watch TV, etc, and every residents tend to use more electricity, so $\beta_{resident}$ increases. After the Christmas holiday, people return to work and study, and $\beta_{resident}$ decreases.
+
+Comparing households # 30, # 83, # 91 and population level, we can find households # 91 have the similar level and pattern of average consumption for a resident with population level. As for households # 83, before 01/01/2010, it has a bit less daily average consumption than population level, while after 01/01/2010, it exceeds the population level about 0.3. Households # 30 is opposite to # 83, before 01/01/2010, it exceeds the population level a bit, after 01/01/2010, it has lower consumption than the population level. Based on this, we can guess something happens on 01/01/2010 to make the effect of households # 83 exceeds the population level. 
+
+To validate our analysis, we print the predictors and electricity consumption of day1, 20, 40, 60, 80, 100, 120 for household #30, #83, #91, and the population mean level. It's obvious that the consumption increases and reaches highest on day 40, then decreases and return the previous level on day 60. And before day 60, households # 83(# 30) has lower-than-mean-level (higher-than-mean-level) consumption before day 60, after day 60, households # 83(# 30) has higher-than-mean-level (lower-than-mean-level) consumption.
+
+```{r, echo=FALSE}
+col <- c("Attitude.Environment","Education","Resident","Bedroom","V1","V20","V40","V60","V80","V100","V120")
+mydata <- rbind(data[c(30,83,91),col], sapply(data[col], mean))
+rownames(mydata) <- c("households # 30","households # 83","households # 91","population")
+mydata
+```
+
+##problem 4
+
+Based on the model of Problem 3, we make some change. Since we care about the population-level time-varying pattern of the energy consumption, we do not use hierachical model any more. Since we only have population-level $\beta$, it's neccessary to find some way to represent the posterior energy consumption, here we use the predicted posterior energy consumption computed by the mean of the predictors.
+
+As for predictor selection, considering the correlation between the tariff structure on electricity consumption and people's attitude of reduced bill, we decide to include predictor Attitude-Reduce Bill in our model. So here we use five predictors: Resident,Attitude-Reduce Bill, Attitude-Environment, Education and Bedroom. 
+
+```{r, results='hide'}
+set.seed(1234)
+X.mat4=model.matrix(~ Room+AR+AE+Edu+Resident)
+
+C0inv4=t(X.mat4)%*% X.mat4 # Precision matrix
+jags.data4=list(Y=data[,7:127], nhouseholds=151, ndays=121, Xmat=X.mat4,
+                mean.bedroom=mean(X.mat4[,2]),mean.AR=mean(X.mat4[,3]),
+                mean.AE=mean(X.mat4[,4]),mean.education=mean(X.mat4[,5]),
+                mean.resident=mean(X.mat4[,6]),C0inv=C0inv4,
+                gg=dim(X.mat4)[1])
+
+model_string4 = "
+model {
+for (j in 1:ndays) {
+for ( i in 1:nhouseholds){
+Y[i,j] ~ dnorm(m[i,j], tau[j])
+m[i,j] <- beta[1,j] + beta[2,j] * Xmat[i,2] + beta[3,j] * Xmat[i,3] 
++ beta[4,j] *  Xmat[i,4] + beta[5,j] *  Xmat[i,5] + beta[6,j] *  Xmat[i,6]
+}
+}
+
+for (j in 1:ndays) {
+for (r in 1:6){
+beta[r,j] ~dmnorm(0,(tau[j]/gg)*C0inv[r,r])
+}
+tau[j] ~ dgamma(0.001,0.001)
+}
+
+# predict mean electricity consumption 
+for (j in 1:ndays){
+mu[j] <- beta[1,j] + beta[2,j] * mean.bedroom + beta[3,j] * mean.AR
++ beta[4,j] *  mean.AE + beta[5,j] *  mean.education + beta[6,j] *  mean.resident
+}
+
+# hypothesis testing
+diff44_47 <- mu[44]-mu[47]
+diff47_50 <- mu[47]-mu[50]
+diffP <- step(5-diff44_47)*step(diff47_50-5)
+mu1_5 <- (mu[1]+mu[2]+mu[3]+mu[4]+mu[5])/5
+mu117_121 <- (mu[117]+mu[118]+mu[119]+mu[120]+mu[121])/5
+muP <- step(mu1_5-mu117_121)
+}"
+
+jags.param4 <- c("mu")
+jags.param41 <- c("diff44_47","diff47_50","diffP","mu1_5","mu117_121","muP")
+jags.fit4 <- jags(jags.data4, parameters.to.save=jags.param4,
+                  model.file=textConnection(model_string4),n.chains=3, 
+                  n.iter=20000, n.thin=4, n.burnin=5000)
+```
+
+
+```{r, echo=FALSE, results='hide', eval=FALSE}
+# check DIC
+jags.fit4$BUGSoutput$DIC
+
+# check convergence
+jags.fit4.mcmc <- as.mcmc(jags.fit4)
+gelman.plot(jags.fit4.mcmc[,2])
+```
+
+the DIC of the model is 139832.1 and it's much less than the DIC of the model in Problem 3. The model has already reached convergence.
+
+In order to gain some sense about the time-varying pattern of the electricity consumption, we plot the posterior predicted electricity consumption with respect to time.
+
+```{r, echo=FALSE, fig.width=7, fig.height=4}
+mu=rep(NA, 121)
+for(i in 1:121){
+  mu[i]=mean(jags.fit4$BUGSoutput$sims.matrix[,paste("mu[", i, "]", sep="")])
+}
+x=seq(1,121,1) 
+plot(x,mu,col="black",type='l',lwd=2,xlab="time", 
+     ylab="posterior predicted electricity consumption",
+     main="time-varying posterior predicted electricity consumption")
+lines(c(47,47),c(0,50),col="red",lwd=2)
+```
+
+From the plot, we can find that in the first 30 days, the consumption bounces around between 27 and 38, also increases a bit, it increases rapidly during Chrismas holiday, and decreases after that. What is noteworthy is that there is a significantly sharp decrease of consumption in 01/01/2010 (day#47, when the tariff changes). And in the continuous period, the consumtion remains in a low level, even lower than the most previous consumption level.
+
+To prove our analysis, we conduct two hypothesis testing. The first is we want to prove before tariff change, the consumption is decreasing, after tariff change, the consumption is decreasing more rapidly. So we compare the difference between 3 days before (day#44) and day#47, 3 days after (day#50) and day#47, also compute $P(diff_{44-47}<5\ and\ diff_{47-50}>5|data)$.
+
+The result shows the mean of $diff_{44-47}$ is 1.664, the mean of $diff_{47-50}$ is 7.896. $P(diff_{44-47}<5\ and\ diff_{47-50}>5|data)=0.955$. Thus, our guess is correct!
+
+The second is we want to prove during the 2.5 months after the change, the consumption is still lower than that before the tariff change. So we compare the mean consumption of the first 5 days and the last 5 days, also compute $P(\mu_{1:5}> \mu_{117:121}|data)$.
+
+The result shows $\mu_{1:5}$ is 28.384, $\mu_{117:121}$ is 24.047 $P(\mu_{1:5}> \mu_{117:121}|data)=1$. Thus, our guess is also correct!
+
