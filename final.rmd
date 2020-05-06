@@ -582,5 +582,5 @@ The result shows the mean of $diff_{44-47}$ is 1.664, the mean of $diff_{47-50}$
 
 The second is we want to prove during the 2.5 months after the change, the consumption is still lower than that before the tariff change. So we compare the mean consumption of the first 5 days and the last 5 days, also compute $P(\mu_{1:5}> \mu_{117:121}|data)$.
 
-The result shows $\mu_{1:5}$ is 28.384, $\mu_{117:121}$ is 24.047 $P(\mu_{1:5}> \mu_{117:121}|data)=1$. Thus, our guess is also correct!
+The result shows $\mu_{1:5}$ is 28.384, $\mu_{117:121}$ is 24.047 $P(\mu_{1:5}> \mu_{117:121}|data)=1$. There is statistical evidence to support that the consumption is lower than that before the tariff change.
 
