@@ -1,0 +1,209 @@
+## Probelm 1
+
+Provide the posterior distributions of $\sigma1$ and $\sigma2$, as well as the regression parameters related to the clinical variables.
+
+Suppose $Y_i \sim Bern(1,q_i)$ represent the patient i will get the stroke or not.
+The model we built is a logistic regression model with hyperprior.
+
+
+```{r}
+library(R2jags)
+library(bayesplot)
+stroke=read.table("/Users/jing/Desktop/2020 winter/Stat 225/hw2/Stroke.csv",sep=',',header=T)
+stroke$Gender<-as.numeric(stroke$Gender)-1
+attach(stroke)
+n = dim(stroke)[1];
+dim2 = dim(stroke)[2]
+Y=stroke[,16]
+x = as.matrix(stroke[,2:(dim2-1)])
+x=scale(x[,2:14])
+x = cbind(stroke$Gender, x)
+X = cbind(rep(1, n), x)
+Xc = X[,1:5]
+
+
+logistic_model <- "model{
+
+   # Likelihood
+
+   for(i in 1:n){
+    Y[i] ~ dbern(q[i])
+    logit(q[i]) <-beta[1]*X[i,1] + beta[2]*X[i,2] + 
+                   beta[3]*X[i,3] + beta[4]*X[i,4] + beta[5]*X[i,5]+
+                   beta[6]*X[i,6] + beta[7]*X[i,7] + beta[8]*X[i,8]+
+                   beta[9]*X[i,9] + beta[10]*X[i,10] + beta[11]*X[i,11]+
+                   beta[12]*X[i,12] + beta[13]*X[i,13] + beta[14]*X[i,14]+beta[15]*X[i,15]
+   }
+
+   #Priors
+   beta[1] ~dnorm(0,1/1000)
+   for(j in 2:5){
+    beta[j] ~ dnorm(0,prec1)
+   }
+   for(j in 6:15){
+    beta[j] ~ dnorm(0,prec2)
+   }
+  prec1 ~ dgamma(0.001,0.001)
+  prec2 ~ dgamma(0.001,0.001)
+   sigma.sq1 <- 1/prec1
+   sigma.sq2 <- 1/prec2
+ 
+  }"
+dat<- list(Y=Y,n=n,X=X)
+jags.param=c("beta","sigma.sq1",'sigma.sq2')
+fit <- jags(data=dat, n.chains=5, inits=NULL,parameters=jags.param, n.iter=3000, 
+                n.burnin=1000, DIC=TRUE, model.file=textConnection(logistic_model))
+print(fit, intervals=c(0.025, 0.975))
+library(bayesplot)
+fit.mcmc <- as.mcmc(fit)
+plot(fit.mcmc[,2])
+mcmc_dens(fit.mcmc, pars = c('beta[2]','beta[3]','beta[4]','beta[5]',"sigma.sq1", "sigma.sq2"))
+autocorr.plot(fit.mcmc[,2])
+fit$BUGSoutput$DIC
+```
+from the autocorr.plot, it donsen't show long range dependence, which means our model reach stable.
+
+
+## Probelm 2
+Using a 5-fold cross-validation and DIC, evaluate the performance of your model and compare it to a simpler model that uses the clinical variables only (i.e., excluding the EEG variables).
+
+First, I seperate the whole stroke data set into five folds,then use each fold as test set and the other four folds as train set. Then we use the posterior coeffiencents we got to compute the predictive distribution and compuete the mean of predictive distribution as the estimataed probibility of patient i whether get stroke or not.
+
+```{r,fig.width=2, fig.height=2,message=FALSE}
+library(modelr)
+#library(ROOC)
+library(pROC)
+strokenew<-cbind(X,Y)
+set.seed(523)
+#Randomly shuffle the data
+strokecv<-stroke[sample(nrow(stroke)),]
+#Create 5 equally size folds
+folds <- cut(seq(1,nrow(strokecv)),breaks=5,labels=FALSE)
+#Perform 5 fold cross validation
+
+auc1 <- matrix(nrow=5,ncol=1) 
+DIC1 <- matrix(nrow=5,ncol=1) 
+  #Segement your data by fold using the which() function 
+
+#5 fold CV for full model
+for (l in 1:5) {
+  
+
+  testIndexes <- which(folds==l,arr.ind=TRUE)
+  testData <- strokenew[testIndexes, ]
+  trainData <- strokenew[-testIndexes, ]
+  Xr<-trainData[,1:15]
+  Yr<-trainData[,16]
+  Xt<-testData[,1:15]
+  Yt<-testData[,16]
+  
+  logistic_model <- "model{
+
+   # Likelihood
+
+   for(i in 1:n){
+    Y[i] ~ dbern(q[i])
+    logit(q[i]) <-beta[1]*Xr[i,1] + beta[2]*Xr[i,2] + 
+                   beta[3]*Xr[i,3] + beta[4]*Xr[i,4] + beta[5]*Xr[i,5]+
+                   beta[6]*Xr[i,6] + beta[7]*Xr[i,7] + beta[8]*Xr[i,8]+
+                   beta[9]*Xr[i,9] + beta[10]*Xr[i,10] + beta[11]*Xr[i,11]+
+                   beta[12]*Xr[i,12] + beta[13]*Xr[i,13] + beta[14]*Xr[i,14]+beta[15]*Xr[i,15]
+   }
+
+   #Priors
+   beta[1] ~dnorm(0,1/1000)
+   for(j in 2:5){
+    beta[j] ~ dnorm(0,prec1)
+   }
+   for(j in 6:15){
+    beta[j] ~ dnorm(0,prec2)
+   }
+  prec1 ~ dgamma(0.001,0.001)
+  prec2 ~ dgamma(0.001,0.001)
+   sigma.sq1 <- 1/prec1
+   sigma.sq2 <- 1/prec2
+   
+   #prediction
+ for(k in 1:K) {
+  
+  Phat[k] <- 1/(1+exp(-(beta[1]*Xt[k,1] + beta[2]*Xt[k,2] + 
+    beta[3]*Xt[k,3] + beta[4]*Xt[k,4] + beta[5]*Xt[k,5]+
+    beta[6]*Xt[k,6] + beta[7]*Xt[k,7] + beta[8]*Xt[k,8]+
+    beta[9]*Xt[k,9] + beta[10]*Xt[k,10] + beta[11]*Xt[k,11]+
+    beta[12]*Xt[k,12] + beta[13]*Xt[k,13] + beta[14]*Xt[k,14]+beta[15]*Xt[k,15])))
+   
+  }
+
+
+  }"
+dat<- list(Y=Yr,n=80,Xr=Xr,Xt=Xt,K=20)
+jags.param=c("beta","Phat")
+fit <- jags(data=dat, n.chains=5, inits=NULL,parameters=jags.param, n.iter=3000, 
+            n.burnin=1000, DIC=TRUE, model.file=textConnection(logistic_model))
+
+
+ptest<-fit$BUGSoutput$mean$Phat
+auc1[l,]<-auc(Yt, ptest)
+print(roc(Yt, ptest,plot = T,levels=c("0", "1"), direction="<"))
+DIC1[l,]<-fit$BUGSoutput$DIC
+
+}
+print(mean(auc1))
+print(mean(DIC1))
+
+
+# 5 folds cv for simple model
+auc2 <- matrix(nrow=5,ncol=1) 
+DIC2 <- matrix(nrow=5,ncol=1) 
+for (l in 1:5) {
+  
+  testIndexes <- which(folds==l,arr.ind=TRUE)
+  testData <- strokenew[testIndexes, ]
+  trainData <- strokenew[-testIndexes, ]
+  Xr<-trainData[,1:5]
+  Yr<-trainData[,16]
+  Xt<-testData[,1:5]
+  Yt<-testData[,16]
+  
+  logistic_model_c <- "model{
+
+   # Likelihood
+
+   for(i in 1:n){
+    Y[i] ~ dbern(q[i])
+    logit(q[i]) <-beta[1]*Xr[i,1] + beta[2]*Xr[i,2] + 
+                   beta[3]*Xr[i,3] + beta[4]*Xr[i,4]+beta[5]*Xr[i,5]
+   }
+
+   #Priors
+   beta[1] ~dnorm(0,1/1000)
+   for(j in 2:5){
+    beta[j] ~ dnorm(0,prec)
+   }
+   prec ~ dgamma(0.001,0.001)
+    sigma.sq <- 1/prec
+     
+   #prediction
+ for(k in 1:K) {
+  
+  Phat[k] <- 1/(1+exp(-(beta[1]*Xt[k,1] + beta[2]*Xt[k,2] + 
+    beta[3]*Xt[k,3] + beta[4]*Xt[k,4] + beta[5]*Xt[k,5])))
+   
+  }
+
+  }"
+  datc<- list(Y=Yr,n=80,Xr=Xr,Xt=Xt,K=20)
+  jags.paramc=c("beta","Phat")
+  fitc <- jags(data=datc, n.chains=5, inits=NULL,parameters=jags.paramc, n.iter=3000, 
+               n.burnin=1000, DIC=TRUE, model.file=textConnection(logistic_model_c))
+  ptest<-fitc$BUGSoutput$mean$Phat
+  auc2[l,]<-auc(Yt, ptest)
+  print(roc(Yt, ptest,plot = T,levels=c("0", "1"), direction="<"))
+  DIC2[l,]<-fitc$BUGSoutput$DIC
+}
+
+print(mean(auc2))
+print(mean(DIC2))
+```
+
+The mean auc of 5-fold cross validation in my model is 0.85, the  mean DIC is 94.21, the mean auc of 5-fold cross validation in simple model is 0.74, the mean DIC is 101.77.
