@@ -1,0 +1,83 @@
+---
+title: "hw4"
+author: "Jing Liao"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+
+Firstly, we plot the mixturedata to have a general understanding of the data.
+```{r}
+dat=read.table("/Users/jing/Desktop/2020 winter/Stat 225/MixtureData.csv",sep=',',header=T)
+library(ggplot2)
+library(bayesm)
+X<-as.matrix(dat)
+data <- data.frame(x1 = X[, 1], x2 = X[, 2])
+p <- ggplot(data, aes(x1, x2)) 
+p + geom_point()
+
+```
+From the plot, the data seems could be gathered in 4 or 5 clusters.
+
+Since the data set is multivaraite, I applied a Multivariate Gaussian Mixture Model-Conjugate in Dirichlet package, which is the most widely used nonparametric modeling
+approach for multivariate data and clustering applications.
+
+$$y_i\sim N(y|\theta_i)$$
+$$\theta_i=(\mu_i,\Sigma)$$
+$$\theta_i\sim G, G\sim DP(G_0,\alpha)$$
+ For the unknow paramter we have $\theta$=($\mu$,$\Lambda$) for d dimensional data $\mu$ is a column vector of length d and $\Lambda$ is a d$\times$d dimensional matr
+$$K(y_i|\theta)=\frac{|\Lambda|}{2\pi^{-\frac{d}{2}}}exp(-\frac{1}{2}(y_i-\mu)^T\Lambda(y_i-\mu))$$
+For the prior we choice a multivariate normal distrubution for $\mu$ and Wishart distribution for $\Lambda$
+$$G_0(\mu,\Lambda|\mu_0,\kappa_0,\nu_0,T_0)=N(\mu|\mu_0,(\kappa_0\Lambda)^{-1})Wi_{\nu_0}(\Lambda|T_0)$$
+where $\mu_0$ is the mean vector of the prior, $\kappa_0$,$\nu_0$ are single values and T is a matrix. The default prior parameters are set as $\mu$=0,$\kappa_0$=d,$\nu_0$=d.(d=2 in our case here)
+This prior choice is conjugate to the posterior, therefore the posterior distribution can be expressed analytically
+$$p(\theta|y_i)=N(\mu|\mu_n,(\kappa_n\Lambda_n)^{-1}Wi(\Lambda|\nu_n,T_n))$$
+$$\mu_n=\frac{\kappa_0\mu_0+n\bar{y}}{k+n}$$
+$$\kappa_n=\kappa_0+n$$
+$$\nu_n=\nu_0+n$$
+$$T_n=T_0+\sum_{i=1}^n(y_i-\bar{y})(y_i-\bar{y})^T+\frac{\kappa_0n}{\kappa_0+n}(\mu_0-\bar{y})(\mu_0-\bar{y})^T$$
+
+
+The result of the DirichletProcessMvnormal is 
+```{r}
+library("dirichletprocess")
+dpCluster <-  DirichletProcessMvnormal(X)
+dpCluster <- Fit(dpCluster, 5000, progressBar = FALSE)
+plot(dpCluster)
+```
+There is four clusters of the data suggested by the model.
+The parameters of posterior distribution is:
+```{r}
+dpCluster$alphaPriorParameters
+```
+
+The following plot show the density of the concentration parameter $\alpha$.
+```{r}
+plot(density(dpCluster$alphaChain),main = "density of  concentration parameter $\alpha$")
+```
+
+```{r}
+print(dpCluster)
+```
+The mean number of clustes is 4.21 and the Median $\alpha$ = 0.5. 
+
+The density of the number of cluters in each draw:
+```{r}
+interaction=rep(0,1000) 
+for (i in 1:1000){
+interaction[i]=length(dpCluster$weightsChain[[i]]) }
+hist(interaction)
+```
+
+The weight of assign to each cluster is :
+```{r}
+print(dpCluster$weights)
+
+```
+
+```{r}
+dpCluster$pointsPerCluster
+```
+There is 130 data points in cluster 1, 90 data points in cluster 2, 100 data points in cluster 3, 80 data points in cluster 4. From the simulation of data, we know there is 60,70,80,90,100 in 5 cluster. It indicates that the characteristic of cluster of 60 data points and cluster of 70 data points are similar.
